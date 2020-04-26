@@ -10,3 +10,6 @@
 
 由于随手记没有提供api接口，所有对随手记的操作将模拟网页版随手记的交互。
 目前只完成了登陆部分，验证了可行性，此处感谢[go-http/feidee](https://github.com/go-http/feidee)项目中用go语言实现提供的思路。
+
+### gmail
+gmail 通过 google api调用，需要在google cloud上开通gmail api，并下载 credentials.json 文件到目录中
