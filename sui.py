@@ -260,7 +260,7 @@ class Sui():
         return details
 
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
     # config = readConfig()
     # sui = Sui(config)
     # sui.login()
