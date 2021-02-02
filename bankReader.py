@@ -2,10 +2,15 @@ from abc import ABCMeta, abstractmethod
 import openpyxl
 
 class BankReader(metaclass=ABCMeta):
-    config = None
+    __wb = None
+    __config = None
     def __init__(self, config):
-        self.config = config
-    
+        self.__config = config
+
     @abstractmethod
-    def read(self):
+    def analyseData(self):
         pass
+
+    def openExcel(self, filename):
+        wb = openpyxl.load_workbook(filename)
+        return wb

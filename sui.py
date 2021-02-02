@@ -260,18 +260,12 @@ class Sui():
         return details
 
 
-def readConfig():
-    with open('conf.json') as conf:
-        jconf = conf.read()
-        conf = json.loads(jconf)
-        return conf
-sui = None
 if __name__ == "__main__":
-    config = readConfig()
-    sui = Sui(config)
-    sui.login()
-    # sui.initTallyInfo()
-    # sui.income('473619270', 3, '21612954215')
-    # sui.transfer('473619270', '17330926177', 10)
-    details = sui.accountDetail('17330926177', '2020.01.01', '2021.02.01')
-    print(details)
+    # config = readConfig()
+    # sui = Sui(config)
+    # sui.login()
+    # # sui.initTallyInfo()
+    # # sui.income('473619270', 3, '21612954215')
+    # # sui.transfer('473619270', '17330926177', 10)
+    # details = sui.accountDetail('17330926177', '2020.01.01', '2021.02.01')
+    # print(details)
