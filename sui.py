@@ -248,7 +248,15 @@ class Sui():
         # print(report)
         details = []
         for group in report['groups']:
-            details.extend(group['list'])
+            detailList = group['list']
+            for detail in detailList:
+                dateInfo = detail['date']
+                year = 1990 + dateInfo['year']
+                month = dateInfo['month'] + 1
+                day = dateInfo['date']
+                date = '%4d%02d%02d' % (year, month, day)
+                detail['sdate'] = date
+            details.extend(detailList)
         return details
 
 
