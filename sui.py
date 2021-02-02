@@ -11,12 +11,15 @@ STATUS = "0"
 class Sui():
     __config = None
     __session = None
+    __incomeCategories = None
+    __payoutCategories = None
 
     def __init__(self, config):
         self.__config = config
         self.__session = requests.session()
 
     def login(self):
+        ### 登陆
         username = self.__config['username']
         password = self.__config['password']
         vccodeInfo = self.__getVCCodeInfo()
@@ -31,9 +34,47 @@ class Sui():
         }
         HEADERS['host'] = 'login.sui.com'
         result = self.__session.get("https://login.sui.com/login.do", params = params, headers=HEADERS)
-        print(result.text)
+        print("login result", result.text)
         self.__authRedirect('get', 'https://login.sui.com/auth.do', {}, 1, "https://login.sui.com")
-        
+    
+    def initTallyInfo(self):
+        result = self.__session.get("https://www.sui.com/tally/new.do", headers=HEADERS)
+        soup = BeautifulSoup(result.text, features="html.parser")
+        payoutSelect = soup.find(id="levelSelect-payout")
+        payoutUl = payoutSelect.find(id="ls-ul1-payout")
+        payoutLis = payoutUl.find_all("li", recursive=False)
+        self.__payoutCategories = []
+        for payoutLi in payoutLis:
+            lv1Id = payoutLi["id"][13:]
+            lv1Name = payoutLi.find("span")["title"]
+            payoutUl2 = payoutLi.find(id="ls-ul2-payout-" + lv1Id)
+            payoutLi2s = payoutUl2.find_all("li", recursive=False)[:-1]
+            payoutCat = {"id":lv1Id, "name":lv1Name, "subCat":[]}
+            self.__payoutCategories.append(payoutCat)
+            for payoutLi2 in payoutLi2s:
+                lv2id = payoutLi2["id"][13:]
+                lv2name = payoutLi2.find("span")["title"]
+                lv2Cat = {"id":lv2id, "name":lv2name}
+                payoutCat["subCat"].append(lv2Cat)
+        #print(self.__payoutCategories)
+        self.__incomeCategories = []
+        incomeSelect = soup.find(id="levelSelect-income")
+        incomeUl = incomeSelect.find(id="ls-ul1-income")
+        incomeLis = incomeUl.find_all("li", recursive=False)
+        for incomeLi in incomeLis:
+            lv1Id = incomeLi["id"][13:]
+            lv1Name = incomeLi.find("span")["title"]
+            incomeUl2 = incomeLi.find(id="ls-ul2-income-" + lv1Id)
+            incomeLi2s = incomeUl2.find_all("li", recursive=False)[:-1]
+            incomeCat = {"id": lv1Id, "name": lv1Name, "subCat": []}
+            self.__incomeCategories.append(incomeCat)
+            for incomeLi2 in incomeLi2s:
+                lv2id = incomeLi2["id"][13:]
+                lv2name = incomeLi2.find("span")["title"]
+                lv2Cat = {"id": lv2id, "name": lv2name}
+                incomeCat["subCat"].append(lv2Cat)
+        print(self.__incomeCategories)
+
 
     def getReportIndex(self):
         params = {
@@ -41,7 +82,7 @@ class Sui():
         }
         result = self.__session.post('https://www.sui.com/report_index.rmi', params=params)
         print(result.text)
-
+    
     def __hex_sha1(self,s):
         b = bytes(s, encoding="ascii")
         return sha1(b).hexdigest()
@@ -95,12 +136,16 @@ class Sui():
         return self.__authRedirect(method, action, data, count + 1, referer)
 
 
+
 def readConfig():
     with open('conf.json') as conf:
         jconf = conf.read()
         conf = json.loads(jconf)
         return conf
-config = readConfig()
-sui = Sui(config)
-sui.login()
-sui.getReportIndex()
+sui = None
+if __name__ == "__main__":
+    config = readConfig()
+    sui = Sui(config)
+    sui.login()
+    sui.initTallyInfo()
+
