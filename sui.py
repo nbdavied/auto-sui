@@ -2,6 +2,8 @@ import requests,json
 from hashlib import sha1
 from bs4 import BeautifulSoup
 import re
+import time
+import json
 
 HEADERS = {
     'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.108 Safari/537.36'
@@ -13,6 +15,7 @@ class Sui():
     __session = None
     __incomeCategories = None
     __payoutCategories = None
+    __accounts = None
 
     def __init__(self, config):
         self.__config = config
@@ -73,8 +76,114 @@ class Sui():
                 lv2name = incomeLi2.find("span")["title"]
                 lv2Cat = {"id": lv2id, "name": lv2name}
                 incomeCat["subCat"].append(lv2Cat)
-        print(self.__incomeCategories)
+        # print(self.__incomeCategories)
+        accountsUl = soup.find(id="ul_tb-inAccount-5")
+        accountLis = accountsUl.find_all('li', recursive=False)
+        self.__accounts = []
+        for li in accountLis:
+            accid = li["id"][17:]
+            accName = li.text
+            self.__accounts.append({"id":accid, "name":accName})
 
+    def payout(self, account, price, category, id=0, store=0, payTime=None, project=0, member=0, memo='',
+                url='', out_account=0, in_account=0, debt_account='', price2=''):
+        if payTime == None:
+            payTime = time.strftime("%Y-%m-%d %H:%M", time.localtime())
+        params = {
+            'id':id,
+            'category':category,
+            'store':store,
+            'time': payTime,
+            'project':project,
+            'member':member,
+            'memo':memo,
+            'url':url,
+            'out_account':out_account,
+            'in_account':in_account,
+            'debt_account':debt_account,
+            'account':account,
+            'price':price,
+            'price2':price2
+        }
+        result = self.__session.post(
+            'https://www.sui.com/tally/payout.rmi', params=params, headers=HEADERS)
+        print("支出记账结果", result.text)
+
+    def income(self, account, price, category, id=0, store=0, payTime=None, project=0, member=0, memo='',
+               url='', out_account=0, in_account=0, debt_account='', price2=''):
+        if payTime == None:
+            payTime = time.strftime("%Y-%m-%d %H:%M", time.localtime())
+        params = {
+            'id': id,
+            'category': category,
+            'store': store,
+            'time': payTime,
+            'project': project,
+            'member': member,
+            'memo': memo,
+            'url': url,
+            'out_account': out_account,
+            'in_account': in_account,
+            'debt_account': debt_account,
+            'account': account,
+            'price': price,
+            'price2': price2
+        }
+        result = self.__session.post(
+            'https://www.sui.com/tally/income.rmi', params=params, headers=HEADERS)
+        print('收入记账结果', result.text)
+
+    def transfer(self, out_account, in_account, price, id=0, store=0, payTime=None, project=0, member=0, memo='',
+                 url='', debt_account='', account=0, price2=''):
+        if payTime == None:
+            payTime = time.strftime("%Y-%m-%d %H:%M", time.localtime())
+        params = {
+            'id': id,
+            'store': store,
+            'time': payTime,
+            'project': project,
+            'member': member,
+            'memo': memo,
+            'url': url,
+            'out_account': out_account,
+            'in_account': in_account,
+            'debt_account': debt_account,
+            'account': account,
+            'price': price,
+            'price2': price2
+        }
+        result = self.__session.post(
+            'https://www.sui.com/tally/transfer.rmi', params=params, headers=HEADERS)
+        print('转账记账结果', result.text)
+
+    def accountDetail(self, accountId, beginDate, endDate):
+        params = {
+            'opt':'list2',
+            'beginDate':beginDate,
+            'endDate':endDate,
+            'cids':0,
+            'bids':accountId,
+            'sids':0,
+            'pids':0,
+            'memids': 0,
+            'order':'',
+            'isDesc': 0,
+            'page': 1,
+            'note':'',
+            'mids': 0
+        }
+        result = self.__session.post('https://www.sui.com/tally/new.rmi', params=params, headers=HEADERS)
+        # print(result.text)
+        report = json.loads(result.text)
+        details = self.__getDetailInPageData(report)
+        pageCount = report['pageCount']
+        for i in range(2, pageCount+1):
+            params['page'] = i
+            result = self.__session.post('https://www.sui.com/tally/new.rmi', params=params, headers=HEADERS)
+            report = json.loads(result.text)
+            details.extend(self.__getDetailInPageData(report))
+        return details
+        
 
     def getReportIndex(self):
         params = {
@@ -134,7 +243,13 @@ class Sui():
         if action[0] == '/':
             action = referer + action[1:]
         return self.__authRedirect(method, action, data, count + 1, referer)
-
+    
+    def __getDetailInPageData(self, report):
+        # print(report)
+        details = []
+        for group in report['groups']:
+            details.extend(group['list'])
+        return details
 
 
 def readConfig():
@@ -147,5 +262,8 @@ if __name__ == "__main__":
     config = readConfig()
     sui = Sui(config)
     sui.login()
-    sui.initTallyInfo()
-
+    # sui.initTallyInfo()
+    # sui.income('473619270', 3, '21612954215')
+    # sui.transfer('473619270', '17330926177', 10)
+    details = sui.accountDetail('17330926177', '2020.01.01', '2021.02.01')
+    print(details)
