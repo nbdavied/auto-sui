@@ -37,8 +37,9 @@ class Sui():
         }
         HEADERS['host'] = 'login.sui.com'
         result = self.__session.get("https://login.sui.com/login.do", params = params, headers=HEADERS)
-        print("login result", result.text)
+        # print("login result", result.text)
         self.__authRedirect('get', 'https://login.sui.com/auth.do', {}, 1, "https://login.sui.com")
+        print("登陆成功")
     
     def initTallyInfo(self):
         result = self.__session.get("https://www.sui.com/tally/new.do", headers=HEADERS)
@@ -203,7 +204,7 @@ class Sui():
         return json.loads(text)
 
     def __authRedirect(self, method, address, data, count, referer):
-        print('第' , count , '次跳转，',method,address, '参数:', data)
+        # print('第' , count , '次跳转，',method,address, '参数:', data)
         result = None
         host = re.findall('https://(.*?)/', address)[0]
         header = {

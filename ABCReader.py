@@ -13,6 +13,9 @@ class ABCReader(BankReader):
         rowIndex = 0
         bankDetails = []
         for row in rowIter:
+            if rowIndex < 3:
+                rowIndex = rowIndex + 1
+                continue
             date = row[0].value
             time = row[1].value
             amount = row[2].value
