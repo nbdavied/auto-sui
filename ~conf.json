@@ -1,4 +1,11 @@
 {
     "username":"",
-    "password":""
+    "password":"",
+    "accounts": [
+        {
+            "bankno": "622848*******",
+            "suiid": "1733*******",
+            "type":"debit"
+        }
+    ]
 }
