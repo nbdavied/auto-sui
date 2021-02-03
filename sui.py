@@ -184,8 +184,43 @@ class Sui():
             report = json.loads(result.text)
             details.extend(self.__getDetailInPageData(report))
         return details
-        
+    
+    def selectIncomeCategory(self):
+        for index, pcat in enumerate(self.__incomeCategories):
+            print(index, pcat["name"])
+        pcatIndex = int(input('please select category:'))
+        if pcatIndex >= len(self.__incomeCategories):
+            return None
+        pcat = self.__incomeCategories[pcatIndex]
+        for index, scat in enumerate(pcat["subCat"]):
+            print(index, scat["name"])
+        scatIndex = int(input("please select sub category:"))
+        if scatIndex >= len(pcat["subCat"]):
+            return selectIncomeCategory()
+        return pcat["subCat"][scatIndex]
+    
+    def selectPayoutCategory(self):
+        for index, pcat in enumerate(self.__payoutCategories):
+            print(index, pcat["name"])
+        pcatIndex = int(input('please select category:'))
+        if pcatIndex >= len(self.__payoutCategories):
+            return None
+        pcat = self.__payoutCategories[pcatIndex]
+        for index, scat in enumerate(pcat["subCat"]):
+            print(index, scat["name"])
+        scatIndex = int(input("please select sub category:"))
+        if scatIndex >= len(pcat["subCat"]):
+            return selectIncomeCategory()
+        return pcat["subCat"][scatIndex]
 
+    def selectAccount(self):
+        for index, acc in enumerate(self.__accounts):
+            print(index, acc["name"])
+        accIndex = int(input("please select account:"))
+        if accIndex >= len(self.__accounts):
+            return None
+        return self.__accounts[accIndex]
+    
     def getReportIndex(self):
         params = {
             'm':'a'
@@ -252,7 +287,7 @@ class Sui():
             detailList = group['list']
             for detail in detailList:
                 dateInfo = detail['date']
-                year = 1990 + dateInfo['year']
+                year = 1900 + dateInfo['year']
                 month = dateInfo['month'] + 1
                 day = dateInfo['date']
                 date = '%4d%02d%02d' % (year, month, day)
