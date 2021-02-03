@@ -196,7 +196,7 @@ class Sui():
             print(index, scat["name"])
         scatIndex = int(input("please select sub category:"))
         if scatIndex >= len(pcat["subCat"]):
-            return selectIncomeCategory()
+            return self.selectIncomeCategory()
         return pcat["subCat"][scatIndex]
     
     def selectPayoutCategory(self):
@@ -210,7 +210,7 @@ class Sui():
             print(index, scat["name"])
         scatIndex = int(input("please select sub category:"))
         if scatIndex >= len(pcat["subCat"]):
-            return selectIncomeCategory()
+            return self.selectPayoutCategory()
         return pcat["subCat"][scatIndex]
 
     def selectAccount(self):
