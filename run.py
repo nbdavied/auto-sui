@@ -10,15 +10,9 @@ def readConfig():
 def createBankReader(filename, path):
     if filename[:3] == 'abc':
         return ABCReader(config, os.path.join(path, filename))
-    return None
-def determTransType(bankDetail):
-    if bankDetail["amount"][0] == '+':
-        return 'income'
-    if bankDetail["amount"][0] == '-':
-        return 'payout'
-    return None
+
 def determAmount(bankDetail, suiDetail):
-    bAmt = bankDetail["amount"][1:]
+    bAmt = bankDetail["amount"]
     sAmt = format(suiDetail["itemAmount"], '0.2f')
     return bAmt == sAmt
 def isMatchedDetail(bankDetail, suiDetail, suiid):
@@ -26,19 +20,19 @@ def isMatchedDetail(bankDetail, suiDetail, suiid):
         return False
     if not determAmount(bankDetail, suiDetail):
         return False
-    transType = determTransType(bankDetail)
+    transType = bankDetail['transType']
     if transType == 'income':
         if suiDetail['tranType'] == 5:
             return True
-        if suiDetail['tranType'] == 2 and suiDetail['sellerAcountId'] == suiid:
+        if suiDetail['tranType'] == 2 and str(suiDetail['sellerAcountId']) == suiid:
             return True
     if transType == 'payout':
         if suiDetail['tranType'] == 1:
             return True
-        if suiDetail['tranType'] == 2 and suiDetail['buyerAccountId'] == suiid:
+        if suiDetail['tranType'] == 2 and str(suiDetail['buyerAcountId']) == suiid:
             return True
     return False
-    
+
 def findSuiDetail(bankDetail, suiDetails, suiid):
     for suiDetail in suiDetails:
         if isMatchedDetail(bankDetail, suiDetail, suiid):
@@ -60,12 +54,43 @@ if __name__ == "__main__":
             # print(bankDetail)
     sui = Sui(config)
     sui.login()
+    sui.initTallyInfo()
     for bank in banks:
         suiid = bank['suiid']
         suiDetails = sui.accountDetail(suiid, "2021.01.02", "2021.02.02")
         print(suiDetails)
         bankDetails = bank['details']
-        print(bankDetails)
+        # print(bankDetails)
         for bankDetail in bankDetails:
-            transType = determTransType(bankDetail)
-
+            matchedSuiDetail = findSuiDetail(bankDetail, suiDetails, suiid)
+            if matchedSuiDetail != None:
+                bankDetail["tranId"] = matchedSuiDetail["tranId"]
+                print("------------------------")
+                print("已记账条目：")
+                print(bankDetail)
+                print(matchedSuiDetail)
+            else:
+                print("------------------------")
+                print("未记账条目：")
+                print(bankDetail)
+                date = bankDetail['date']
+                time = bankDetail['time']
+                payTime = "%s-%s-%s %s:%s" % (
+                    date[0:4], date[4:6], date[6:8], time[0:2], time[2:4])
+                if bankDetail['transType'] == 'income':
+                    opType = input("请选择记账种类：0-收入 1-转账\r\n")
+                    if opType == '0':
+                        incomeCate = sui.selectIncomeCategory()
+                        sui.income(suiid, bankDetail['amount'], incomeCate['id'], payTime=payTime, memo=bankDetail['memo'])
+                    elif opType== '1':
+                        opAccount = sui.selectAccount()
+                        sui.transfer(opAccount['id'], suiid, bankDetail['amount'], payTime=payTime, memo=bankDetail['memo'])
+                else:
+                    opType = input("请选择记账种类：1-转账 2-支出\r\n")
+                    if opType == '2':
+                        payoutCate = sui.selectPayoutCategory()
+                        sui.payout(suiid, bankDetail['amount'], payoutCate['id'], payTime=payTime, memo=bankDetail['memo'])
+                    elif opType == '1':
+                        print("选择转入账户")
+                        opAccount = sui.selectAccount()
+                        sui.transfer(suiid, opAccount['id'], bankDetail['amount'], payTime=payTime, memo=bankDetail['memo'])

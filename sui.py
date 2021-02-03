@@ -188,13 +188,13 @@ class Sui():
     def selectIncomeCategory(self):
         for index, pcat in enumerate(self.__incomeCategories):
             print(index, pcat["name"])
-        pcatIndex = int(input('please select category:'))
+        pcatIndex = int(input('请输入收入类型:'))
         if pcatIndex >= len(self.__incomeCategories):
             return None
         pcat = self.__incomeCategories[pcatIndex]
         for index, scat in enumerate(pcat["subCat"]):
             print(index, scat["name"])
-        scatIndex = int(input("please select sub category:"))
+        scatIndex = int(input("请输入收入类型:"))
         if scatIndex >= len(pcat["subCat"]):
             return self.selectIncomeCategory()
         return pcat["subCat"][scatIndex]
@@ -202,13 +202,13 @@ class Sui():
     def selectPayoutCategory(self):
         for index, pcat in enumerate(self.__payoutCategories):
             print(index, pcat["name"])
-        pcatIndex = int(input('please select category:'))
+        pcatIndex = int(input('请输入支出类型:'))
         if pcatIndex >= len(self.__payoutCategories):
             return None
         pcat = self.__payoutCategories[pcatIndex]
         for index, scat in enumerate(pcat["subCat"]):
             print(index, scat["name"])
-        scatIndex = int(input("please select sub category:"))
+        scatIndex = int(input("请输入支出类型:"))
         if scatIndex >= len(pcat["subCat"]):
             return self.selectPayoutCategory()
         return pcat["subCat"][scatIndex]
@@ -216,7 +216,7 @@ class Sui():
     def selectAccount(self):
         for index, acc in enumerate(self.__accounts):
             print(index, acc["name"])
-        accIndex = int(input("please select account:"))
+        accIndex = int(input("请选择账户:"))
         if accIndex >= len(self.__accounts):
             return None
         return self.__accounts[accIndex]

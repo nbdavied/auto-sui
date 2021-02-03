@@ -24,9 +24,10 @@ class ABCReader(BankReader):
             opAccNo = row[5].value
             transBank = row[6].value
             channel = row[7].value
-            transType = row[8].value
             usage = row[9].value
             memo = row[10].value
+            transType = self.__determTransType(amount)
+            amount = amount[1:]
             detail = {
                 "date":date,
                 "time":time,
@@ -41,8 +42,17 @@ class ABCReader(BankReader):
                 "memo":memo
             }
             bankDetails.append(detail)
+        print("导入农业银行账单")
+        print("卡号：", bankno)
         return {
             "bankno":bankno,
             "suiid":accountInfo["suiid"],
             "details":bankDetails
         }
+
+    def __determTransType(self, amount):
+        if amount[0] == '+':
+            return 'income'
+        if amount[0] == '-':
+            return 'payout'
+        return None
