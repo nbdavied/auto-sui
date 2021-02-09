@@ -1,7 +1,10 @@
 import json
 import os
 from ABCReader import ABCReader
+from ABCCreditReader import ABCCreditReader
 from sui import Sui
+import gmail
+import re
 def readConfig():
     with open('conf.json') as conf:
         jconf = conf.read()
@@ -11,6 +14,11 @@ def createBankReader(filename, path):
     if filename[:3] == 'abc':
         return ABCReader(config, os.path.join(path, filename))
 
+
+def createBankReaderByMail(mail):
+    fromEmail = re.findall('<(.*)>', mail['From'])[0]
+    if fromEmail == 'e-statement@creditcard.abchina.com':
+        return ABCCreditReader(config, mail)
 def determAmount(bankDetail, suiDetail):
     bAmt = bankDetail["amount"]
     sAmt = format(suiDetail["itemAmount"], '0.2f')
@@ -38,13 +46,14 @@ def findSuiDetail(bankDetail, suiDetails, suiid):
         if isMatchedDetail(bankDetail, suiDetail, suiid):
             return suiDetail
     return None
-
+def transDate(date):
+    return date[0:4] + '.' + date[4:6] + '.' + date[6:8]
 config = None
 if __name__ == "__main__":
     config = readConfig()
-    g = os.walk(config['detailPath'])
+    f = os.walk(config['detailPath'])
     banks = []
-    for path, dirs, files in g:
+    for path, dirs, files in f:
         for filename in files:
             if filename[:1] == '~':
                 continue
@@ -52,12 +61,20 @@ if __name__ == "__main__":
             bankDetail = bankReader.analyseData()
             banks.append(bankDetail)
             # print(bankDetail)
+    g = gmail.Gmail(config)
+    messages = g.getTallyMails()
+    for message in messages:
+        mail = g.getMail(message['id'])
+        bankReader = createBankReaderByMail(mail)
+        bankDetail = bankReader.analyseData()
+        banks.append(bankDetail)
+        
     sui = Sui(config)
     sui.login()
     sui.initTallyInfo()
     for bank in banks:
         suiid = bank['suiid']
-        suiDetails = sui.accountDetail(suiid, "2021.01.02", "2021.02.02")
+        suiDetails = sui.accountDetail(suiid, transDate(bank['startDate']), transDate(bank['endDate']))
         print(suiDetails)
         bankDetails = bank['details']
         # print(bankDetails)

@@ -16,9 +16,10 @@ class Gmail():
     __service = None
     __config = None
     def __init__(self, config):
-        
+        print('开始登陆gmail')
         self.__config = config
         self.__initService()
+        print('gmail登陆完成')
 
     def __initService(self):
         creds = None
@@ -43,7 +44,7 @@ class Gmail():
     def getTallyMails(self):
         results = self.__service.users().messages().list(
             userId='me', labelIds=["Label_20","INBOX"]).execute()
-        return results
+        return results['messages']
 
     def getMail(self, id):
         mail = self.__service.users().messages().get(
@@ -59,6 +60,10 @@ class Gmail():
             'Subject':headerOb['Subject'],
             'data':html
         }
+    
+    def archiveMail(self, id):
+        self.__service.users().messages().modify(userId='me', id=id,
+                                                 body={"removeLabelIds":['INBOX', 'UNREAD']}).execute()
 
     def getLabels(self):
         results = self.__service.users().labels().list(userId='me').execute()

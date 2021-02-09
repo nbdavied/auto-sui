@@ -28,7 +28,7 @@ class ABCCreditReader(BankReader):
             memo = columns[4].find('font').text
             amtCurr = columns[-2].find('font').text
             amt = re.findall('(\d+\.*\d*)/', amtCurr)[0]
-            transAmt = columns[1].find('font').text
+            transAmt = columns[-1].find('font').text
             transType = ''
             if transAmt[0] == '-':
                 transType = 'payout'
