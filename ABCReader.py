@@ -8,6 +8,8 @@ class ABCReader(BankReader):
         sheet = self.__wb['Sheet1']
         accInfo = sheet['A2'].value
         bankno = re.findall('账号：(\d+)', accInfo)[0]
+        startDate = re.findall('起始日期：(\d+)', accInfo)[0]
+        endDate = re.findall('截止日期：(\d+)', accInfo)[0]
         accountInfo = self.getAccountInfo(bankno)
         rowIter = sheet.rows
         rowIndex = 0
@@ -47,6 +49,8 @@ class ABCReader(BankReader):
         return {
             "bankno":bankno,
             "suiid":accountInfo["suiid"],
+            "startDate":startDate,
+            "endDate":endDate,
             "details":bankDetails
         }
 
