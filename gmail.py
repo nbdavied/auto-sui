@@ -44,7 +44,10 @@ class Gmail():
     def getTallyMails(self):
         results = self.__service.users().messages().list(
             userId='me', labelIds=["Label_20","INBOX"]).execute()
-        return results['messages']
+        if 'messages' in results:
+            return results['messages']
+        else:
+            return []
 
     def getMail(self, id):
         mail = self.__service.users().messages().get(
