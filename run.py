@@ -2,6 +2,7 @@ import json
 import os
 from ABCReader import ABCReader
 from ABCCreditReader import ABCCreditReader
+from BOCCreditReader import BOCCreditReader
 from sui import Sui
 import gmail
 import re
@@ -16,9 +17,15 @@ def createBankReader(filename, path):
 
 
 def createBankReaderByMail(mail):
-    fromEmail = re.findall('<(.*)>', mail['From'])[0]
+    fromEmail = ''
+    try:
+        fromEmail = re.findall('<(.*)>', mail['From'])[0]
+    except IndexError:
+        fromEmail = mail['From']
     if fromEmail == 'e-statement@creditcard.abchina.com':
         return ABCCreditReader(config, mail)
+    elif fromEmail == 'boczhangdan@bankofchina.com':
+        return BOCCreditReader(config, mail)
 def determAmount(bankDetail, suiDetail):
     bAmt = bankDetail["amount"]
     sAmt = format(suiDetail["itemAmount"], '0.2f')

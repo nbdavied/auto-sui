@@ -52,7 +52,7 @@ class Gmail():
     def getMail(self, id):
         mail = self.__service.users().messages().get(
             userId='me', id=id).execute()
-        b64data = mail['payload']['body']['data']
+        b64data = self.__getMailContent(mail['payload'])
         html = base64.urlsafe_b64decode(b64data).decode('utf-8')
         headers = mail['payload']['headers']
         headerOb = self.__parseHeaders(headers)
@@ -77,3 +77,19 @@ class Gmail():
         for h in headers:
             headerOb[h['name']] = h['value']
         return headerOb
+    def __getMailContent(self, messagePart):
+        mimeType = messagePart['mimeType']
+        parts = None
+        if mimeType.startswith('multipart'):
+            parts = messagePart['parts']
+            for part in parts:
+                content =  self.__getMailContent(part)
+                if content is not None:
+                    return content
+            return None
+        elif mimeType == 'text/html':
+            return messagePart['body']['data']
+        else:
+            return None
+    def getService(self):
+        return self.__service
