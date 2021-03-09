@@ -25,7 +25,10 @@ class ABCCreditReader(BankReader):
             columns = tr.find('table').find('table').find(
                 'table').find('tr').findAll('td', recursive=False)
             accDate = columns[1].find('font').text
+            c4style = columns[4]['style']
             memo = columns[4].find('font').text
+            if c4style == 'width:76px;line-height:normal;':
+                memo = columns[5].find('font').text
             amtCurr = columns[-2].find('font').text
             amt = re.findall('(\d+\.*\d*)/', amtCurr)[0]
             transAmt = columns[-1].find('font').text
