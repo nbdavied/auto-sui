@@ -55,6 +55,13 @@ def findSuiDetail(bankDetail, suiDetails, suiid):
     return None
 def transDate(date):
     return date[0:4] + '.' + date[4:6] + '.' + date[6:8]
+def confirmMemo(memo):
+    answer = input('是否备注-('+memo+')?,y/n ')
+    if answer == 'y' or answer == 'Y' or answer == '':
+        return memo
+    else:
+        nmemo = input('请输入备注 ')
+        return nmemo
 config = None
 if __name__ == "__main__":
     config = readConfig()
@@ -105,16 +112,22 @@ if __name__ == "__main__":
                     opType = input("请选择记账种类：0-收入 1-转账\r\n")
                     if opType == '0':
                         incomeCate = sui.selectIncomeCategory()
-                        sui.income(suiid, bankDetail['amount'], incomeCate['id'], payTime=payTime, memo=bankDetail['memo'])
+                        memo = confirmMemo(bankDetail['memo'])
+                        sui.income(suiid, bankDetail['amount'], incomeCate['id'], payTime=payTime, memo=memo)
                     elif opType== '1':
                         opAccount = sui.selectAccount()
-                        sui.transfer(opAccount['id'], suiid, bankDetail['amount'], payTime=payTime, memo=bankDetail['memo'])
+                        memo = confirmMemo(bankDetail['memo'])
+                        sui.transfer(opAccount['id'], suiid, bankDetail['amount'], payTime=payTime, memo=memo)
                 else:
                     opType = input("请选择记账种类：1-转账 2-支出\r\n")
                     if opType == '2':
                         payoutCate = sui.selectPayoutCategory()
-                        sui.payout(suiid, bankDetail['amount'], payoutCate['id'], payTime=payTime, memo=bankDetail['memo'])
+                        memo = confirmMemo(bankDetail['memo'])
+                        sui.payout(
+                            suiid, bankDetail['amount'], payoutCate['id'], payTime=payTime, memo=memo)
                     elif opType == '1':
                         print("选择转入账户")
                         opAccount = sui.selectAccount()
-                        sui.transfer(suiid, opAccount['id'], bankDetail['amount'], payTime=payTime, memo=bankDetail['memo'])
+                        memo = confirmMemo(bankDetail['memo'])
+                        sui.transfer(
+                            suiid, opAccount['id'], bankDetail['amount'], payTime=payTime, memo=memo)
