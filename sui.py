@@ -23,6 +23,7 @@ class Sui():
 
     def login(self):
         ### 登陆
+        print("正在登陆随手记")
         username = self.__config['username']
         password = self.__config['password']
         vccodeInfo = self.__getVCCodeInfo()
@@ -220,6 +221,11 @@ class Sui():
         if accIndex >= len(self.__accounts):
             return None
         return self.__accounts[accIndex]
+    
+    def printAccounts(self):
+        print("随手记账户列表：")
+        for acc in self.__accounts:
+            print(acc['id'], ':', acc['name'])
     
     def getReportIndex(self):
         params = {

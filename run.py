@@ -62,30 +62,46 @@ def confirmMemo(memo):
     else:
         nmemo = input('请输入备注 ')
         return nmemo
+def printBankDetail(detail):
+    print('时间：', detail['date'], detail['time'])
+    print('金额：', detail['amount'])
+    trans = '支出'
+    if detail['transType'] == 'income':
+        trans = '收入'
+    print('交易类型：', trans)
+    print('对手账号：', detail['opAccNo'])
+    print('对手户名：', detail['opAccName'])
+    print('用途：', detail['usage'])
+    print('备注：', detail['memo'])
+
 config = None
 if __name__ == "__main__":
     config = readConfig()
+    sui = Sui(config)
+    sui.login()
+    sui.initTallyInfo()
+    sui.printAccounts()
     f = os.walk(config['detailPath'])
     banks = []
     for path, dirs, files in f:
         for filename in files:
             if filename[:1] == '~':
                 continue
+            if filename[-4:] != 'xlsx':
+                continue
             bankReader = createBankReader(filename, path)
             bankDetail = bankReader.analyseData()
             banks.append(bankDetail)
             # print(bankDetail)
-    g = gmail.Gmail(config)
-    messages = g.getTallyMails()
-    for message in messages:
-        mail = g.getMail(message['id'])
-        bankReader = createBankReaderByMail(mail)
-        bankDetail = bankReader.analyseData()
-        banks.append(bankDetail)
-        
-    sui = Sui(config)
-    sui.login()
-    sui.initTallyInfo()
+    if config['gmail']:
+        g = gmail.Gmail(config)
+        messages = g.getTallyMails()
+        for message in messages:
+            mail = g.getMail(message['id'])
+            bankReader = createBankReaderByMail(mail)
+            bankDetail = bankReader.analyseData()
+            banks.append(bankDetail)
+    
     for bank in banks:
         suiid = bank['suiid']
         suiDetails = sui.accountDetail(suiid, transDate(bank['startDate']), transDate(bank['endDate']))
@@ -103,7 +119,7 @@ if __name__ == "__main__":
             else:
                 print("------------------------")
                 print("未记账条目：")
-                print(bankDetail)
+                printBankDetail(bankDetail)
                 date = bankDetail['date']
                 time = bankDetail['time']
                 payTime = "%s-%s-%s %s:%s" % (

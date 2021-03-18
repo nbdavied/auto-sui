@@ -4,8 +4,9 @@
     "accounts": [
         {
             "bankno": "622848*******",
-            "suiid": "1733*******",
-            "type":"debit"
+            "suiid": "1733*******"
         }
-    ]
+    ],
+    "gmail":false,
+    "detailPath": "bankdetails"
 }
