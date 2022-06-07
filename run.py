@@ -24,8 +24,7 @@ def createBankReaderByMail(mail):
         fromEmail = mail['From']
     if fromEmail == 'e-statement@creditcard.abchina.com':
         return ABCCreditReader(config, mail)
-    elif fromEmail == 'boczhangdan@bankofchina.com':
-        return BOCCreditReader(config, mail)
+
 def determAmount(bankDetail, suiDetail):
     bAmt = bankDetail["amount"]
     sAmt = format(suiDetail["itemAmount"], '0.2f')
@@ -99,8 +98,9 @@ if __name__ == "__main__":
         for message in messages:
             mail = g.getMail(message['id'])
             bankReader = createBankReaderByMail(mail)
-            bankDetail = bankReader.analyseData()
-            banks.append(bankDetail)
+            if bankReader:
+                bankDetail = bankReader.analyseData()
+                banks.append(bankDetail)
     
     for bank in banks:
         suiid = bank['suiid']
