@@ -22,7 +22,8 @@ def createBankReaderByMail(mail):
         fromEmail = re.findall('<(.*)>', mail['From'])[0]
     except IndexError:
         fromEmail = mail['From']
-    if fromEmail == 'e-statement@creditcard.abchina.com':
+    if (fromEmail == 'e-statement@creditcard.abchina.com'
+        or fromEmail == 'e-statement@creditcard.abchina.com.cn'):
         return ABCCreditReader(config, mail)
 
 def determAmount(bankDetail, suiDetail):
