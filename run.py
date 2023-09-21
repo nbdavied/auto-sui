@@ -1,6 +1,7 @@
 import json
 import os
 from ABCReader import ABCReader
+from CCBReader import CCBReader
 from ABCCreditReader import ABCCreditReader
 from BOCCreditReader import BOCCreditReader
 from sui import Sui
@@ -14,6 +15,8 @@ def readConfig():
 def createBankReader(filename, path):
     if filename[:3] == 'abc':
         return ABCReader(config, os.path.join(path, filename))
+    if filename[:4] == 'hqmx':
+        return CCBReader(config, os.path.join(path, filename))
 
 
 def createBankReaderByMail(mail):
@@ -108,7 +111,7 @@ if __name__ == "__main__":
         suiDetails = sui.accountDetail(suiid, transDate(bank['startDate']), transDate(bank['endDate']))
         print(suiDetails)
         bankDetails = bank['details']
-        # print(bankDetails)
+        print(bankDetails)
         for bankDetail in bankDetails:
             matchedSuiDetail = findSuiDetail(bankDetail, suiDetails, suiid)
             if matchedSuiDetail != None:
