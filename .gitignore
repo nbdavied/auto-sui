@@ -134,3 +134,4 @@ dmypy.json
 *.xls
 *.xlsx
 test.py
+bankdetails/
