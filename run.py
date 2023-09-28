@@ -14,7 +14,7 @@ def readConfig():
         return conf
 def saveConfig():
     with open('conf.json', 'w', encoding="utf-8") as conf:
-        jsonstr = json.dumps(config)
+        jsonstr = json.dumps(config, indent=4)
         conf.write(jsonstr)
 
 def createBankReader(filename, path):
