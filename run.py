@@ -12,6 +12,11 @@ def readConfig():
         jconf = conf.read()
         conf = json.loads(jconf)
         return conf
+def saveConfig():
+    with open('conf.json', 'w', encoding="utf-8") as conf:
+        jsonstr = json.dumps(config)
+        conf.write(jsonstr)
+
 def createBankReader(filename, path):
     if filename[:3] == 'abc':
         return ABCReader(config, os.path.join(path, filename))
@@ -77,7 +82,32 @@ def printBankDetail(detail):
     print('用途-usage：', detail['usage'])
     print('备注-memo：', detail['memo'])
 
-def checkRulesExp():
+def saveRule(suiid, op, catid=None, opSuiid=None, memo=None):
+    answer = input('是否保存自动记账模板?, y/n ')
+    if answer == 'y' or answer == 'Y':
+        print("当前记账账号id - ", suiid)
+        exp = None
+        while True:
+            try:
+                exp = input('请输入匹配表达式:')
+                break
+            except:
+                pass
+        rule = {
+            "exp":exp,
+            "op":op
+        }
+        if catid:
+            rule['catid'] = catid
+        if opSuiid:
+            rule['opSuiid'] = opSuiid
+        if memo:
+            rule['memo'] = memo
+        config['rules'].append(rule)
+        saveConfig()
+
+
+def checkExp(exp):
     amount = "1.00"
     transType = "payout"
     opAccNo = ""
@@ -86,11 +116,17 @@ def checkRulesExp():
     memo = ""
     bankno = ""
     suiid = ""
+    try:
+        eval(exp)
+    except:
+        print('规则表达式存在错误 - ', rule['exp'])
+        raise
+
+def checkRulesExp():
     for rule in config["rules"]:
         try:
-            eval(rule['exp'])
+            checkExp(rule['exp'])
         except:
-            print('规则表达式存在错误 - ', rule['exp'])
             raise "表达式配置错误，退出"
 
 def checkRules(detail, bankno, suiid):
@@ -194,20 +230,22 @@ if __name__ == "__main__":
                         incomeCate = sui.selectIncomeCategory()
                         memo = confirmMemo(bankDetail['memo'])
                         sui.income(suiid, bankDetail['amount'], incomeCate['id'], payTime=payTime, memo=memo)
+                        saveRule(suiid, 'income', catid=incomeCate['id'], memo=memo)
                     elif opType== '1':
                         opAccount = sui.selectAccount()
                         memo = confirmMemo(bankDetail['memo'])
                         sui.transfer(opAccount['id'], suiid, bankDetail['amount'], payTime=payTime, memo=memo)
+                        saveRule(suiid, 'transfer', opSuiid=opAccount['id'], memo=memo)
                 else:
                     opType = input("请选择记账种类：1-转账 2-支出\r\n")
                     if opType == '2':
                         payoutCate = sui.selectPayoutCategory()
                         memo = confirmMemo(bankDetail['memo'])
-                        sui.payout(
-                            suiid, bankDetail['amount'], payoutCate['id'], payTime=payTime, memo=memo)
+                        sui.payout(suiid, bankDetail['amount'], payoutCate['id'], payTime=payTime, memo=memo)
+                        saveRule(suiid, 'payout', catid=payoutCate['id'], memo=memo)
                     elif opType == '1':
                         print("选择转入账户")
                         opAccount = sui.selectAccount()
                         memo = confirmMemo(bankDetail['memo'])
-                        sui.transfer(
-                            suiid, opAccount['id'], bankDetail['amount'], payTime=payTime, memo=memo)
+                        sui.transfer(suiid, opAccount['id'], bankDetail['amount'], payTime=payTime, memo=memo)
+                        saveRule(suiid, 'transfer', opSuiid=opAccount['id'], memo=memo)
