@@ -43,6 +43,7 @@ class Sui():
         print("登陆成功")
     
     def initTallyInfo(self):
+        print("初始化收支类型及账户信息")
         result = self.__session.get("https://www.sui.com/tally/new.do", headers=HEADERS)
         soup = BeautifulSoup(result.text, features="html.parser")
         payoutSelect = soup.find(id="levelSelect-payout")
@@ -61,7 +62,7 @@ class Sui():
                 lv2name = payoutLi2.find("span")["title"]
                 lv2Cat = {"id":lv2id, "name":lv2name}
                 payoutCat["subCat"].append(lv2Cat)
-        #print(self.__payoutCategories)
+        print("支出类型", self.__payoutCategories)
         self.__incomeCategories = []
         incomeSelect = soup.find(id="levelSelect-income")
         incomeUl = incomeSelect.find(id="ls-ul1-income")
@@ -78,7 +79,7 @@ class Sui():
                 lv2name = incomeLi2.find("span")["title"]
                 lv2Cat = {"id": lv2id, "name": lv2name}
                 incomeCat["subCat"].append(lv2Cat)
-        # print(self.__incomeCategories)
+        print("收入类型", self.__incomeCategories)
         accountsUl = soup.find(id="ul_tb-inAccount-5")
         accountLis = accountsUl.find_all('li', recursive=False)
         self.__accounts = []

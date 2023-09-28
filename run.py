@@ -8,7 +8,7 @@ from sui import Sui
 import gmail
 import re
 def readConfig():
-    with open('conf.json') as conf:
+    with open('conf.json', encoding='utf-8') as conf:
         jconf = conf.read()
         conf = json.loads(jconf)
         return conf
@@ -66,24 +66,58 @@ def confirmMemo(memo):
         nmemo = input('请输入备注 ')
         return nmemo
 def printBankDetail(detail):
-    print('时间：', detail['date'], detail['time'])
-    print('金额：', detail['amount'])
+    print('时间-date-time：', detail['date'], detail['time'])
+    print('金额-amount：', detail['amount'])
     trans = '支出'
     if detail['transType'] == 'income':
         trans = '收入'
-    print('交易类型：', trans)
-    print('对手账号：', detail['opAccNo'])
-    print('对手户名：', detail['opAccName'])
-    print('用途：', detail['usage'])
-    print('备注：', detail['memo'])
+    print('交易类型-transType-income/payout：', trans)
+    print('对手账号-opAccNo：', detail['opAccNo'])
+    print('对手户名-opAccName：', detail['opAccName'])
+    print('用途-usage：', detail['usage'])
+    print('备注-memo：', detail['memo'])
+
+def checkRulesExp():
+    amount = "1.00"
+    transType = "payout"
+    opAccNo = ""
+    opAccName = ""
+    usage = ""
+    memo = ""
+    bankno = ""
+    suiid = ""
+    for rule in config["rules"]:
+        try:
+            eval(rule['exp'])
+        except:
+            print('规则表达式存在错误 - ', rule['exp'])
+            raise "表达式配置错误，退出"
+
+def checkRules(detail, bankno, suiid):
+    amount = detail['amount']
+    transType = detail['transType']
+    opAccNo = detail['opAccNo']
+    opAccName = detail['opAccName']
+    usage = detail['usage']
+    memo = detail['memo']
+    for rule in config["rules"]:
+        try:
+            if eval(rule['exp']):
+                return rule
+        except:
+            print('规则表达式错误 - ', rule['exp'])
+            pass
+    return None
 
 config = None
 if __name__ == "__main__":
     config = readConfig()
+    checkRulesExp()
     sui = Sui(config)
     sui.login()
     sui.initTallyInfo()
     sui.printAccounts()
+    input('随手记数据初始化完成，确认开始读取本地账单')
     f = os.walk(config['detailPath'])
     banks = []
     for path, dirs, files in f:
@@ -96,6 +130,7 @@ if __name__ == "__main__":
             bankDetail = bankReader.analyseData()
             banks.append(bankDetail)
             # print(bankDetail)
+    input('本地账单读取完成')
     if config['gmail']:
         g = gmail.Gmail(config)
         messages = g.getTallyMails()
@@ -128,6 +163,31 @@ if __name__ == "__main__":
                 time = bankDetail['time']
                 payTime = "%s-%s-%s %s:%s" % (
                     date[0:4], date[4:6], date[6:8], time[0:2], time[2:4])
+                rule = checkRules(bankDetail, bank['bankno'], suiid)
+                if rule != None:
+                    print("自动记账 - ", rule['exp'])
+                    memo = bankDetail['memo']
+                    if 'memo' in rule:
+                        memo = rule['memo']
+                    if rule['op'] == 'income':
+                        print('记账类型 - 收入')
+                        sui.income(suiid, bankDetail['amount'], rule['catid'], payTime=payTime, memo=memo)
+                    elif rule['op'] == 'payout':
+                        print('记账类型 - 支出')
+                        sui.payout(suiid, bankDetail['amount'], rule['catid'], payTime=payTime, memo=memo)
+                    elif rule['op'] == 'transfer':
+                        
+                        if bankDetail['transType'] == 'income':
+                            # transfer in
+                            print('记账类型 - 转入')
+                            sui.transfer(rule['opSuiid'], suiid, bankDetail['amount'], payTime=payTime, memo=memo)
+                        elif bankDetail['transType'] == 'payout':
+                            # transfer out
+                            print('记账类型 - 转出')
+                            sui.transfer(
+                                suiid, rule['opSuiid'], bankDetail['amount'], payTime=payTime, memo=memo)
+                    continue
+
                 if bankDetail['transType'] == 'income':
                     opType = input("请选择记账种类：0-收入 1-转账\r\n")
                     if opType == '0':
