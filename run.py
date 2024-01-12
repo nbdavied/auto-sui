@@ -4,6 +4,7 @@ from ABCReader import ABCReader
 from CCBReader import CCBReader
 from ABCCreditReader import ABCCreditReader
 from BOCCreditReader import BOCCreditReader
+from CMBCreditReader import CMBCreditReader
 from sui import Sui
 import gmail
 import re
@@ -33,6 +34,8 @@ def createBankReaderByMail(mail):
     if (fromEmail == 'e-statement@creditcard.abchina.com'
         or fromEmail == 'e-statement@creditcard.abchina.com.cn'):
         return ABCCreditReader(config, mail)
+    if (fromEmail == 'ccsvc@message.cmbchina.com'):
+        return CMBCreditReader(config, mail)
 
 def determAmount(bankDetail, suiDetail):
     bAmt = bankDetail["amount"]
