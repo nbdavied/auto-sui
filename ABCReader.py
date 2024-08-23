@@ -5,9 +5,9 @@ class ABCReader(BankReader):
         super().__init__(config)
         self.__wb = self.openExcel(filepath)
     def analyseData(self):
-        sheet = self.__wb['Sheet1']
+        sheet = self.__wb['Sheet0']
         accInfo = sheet['A2'].value
-        bankno = re.findall('账号：(\d+)', accInfo)[0]
+        bankno = re.findall('账户：(\d+)', accInfo)[0]
         startDate = re.findall('起始日期：(\d+)', accInfo)[0]
         endDate = re.findall('截止日期：(\d+)', accInfo)[0]
         accountInfo = self.getAccountInfo(bankno)
@@ -18,8 +18,8 @@ class ABCReader(BankReader):
             if rowIndex < 3:
                 rowIndex = rowIndex + 1
                 continue
-            date = row[0].value
-            time = row[1].value
+            date = row[0].value.replace('-','')
+            time = row[1].value.replace(':','')
             amount = row[2].value
             balance = row[3].value
             opAccName = row[4].value

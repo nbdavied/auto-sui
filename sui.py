@@ -6,6 +6,7 @@ import time
 import json
 
 HEADERS = {
+    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
     'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.108 Safari/537.36'
     }
 STATUS = "0"
@@ -43,6 +44,8 @@ class Sui():
         print("登陆成功")
     
     def initTallyInfo(self):
+        print("选择账本")
+        self.__session.get("https://www.sui.com/systemSet/book.do?opt=switch&switchId=1505498391&return=https://www.sui.com/tally/new.do", headers=HEADERS)
         print("初始化收支类型及账户信息")
         result = self.__session.get("https://www.sui.com/tally/new.do", headers=HEADERS)
         soup = BeautifulSoup(result.text, features="html.parser")
