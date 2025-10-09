@@ -7,7 +7,7 @@ class ABCReader(BankReader):
     def analyseData(self):
         sheet = self.__wb['Sheet0']
         accInfo = sheet['A2'].value
-        bankno = re.findall('账户：(\d+)', accInfo)[0]
+        bankno = re.findall('账户：(\d+\*+\d+)', accInfo)[0]
         startDate = re.findall('起始日期：(\d+)', accInfo)[0]
         endDate = re.findall('截止日期：(\d+)', accInfo)[0]
         accountInfo = self.getAccountInfo(bankno)
