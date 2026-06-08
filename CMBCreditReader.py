@@ -15,8 +15,8 @@ class CMBCreditReader(BankReader):
         band38 = soup.find(id='fixBand38')
         billDateTd  = band38.find('table').find('table').findAll('td')[2]
         billDate = billDateTd.find(id='statementCycle').text
-        billDateFrom = billDate.split('-')[0]
-        billDateTo = billDate.split('-')[1]
+        billDateFrom = billDate.split('-')[0].strip()
+        billDateTo = billDate.split('-')[1].strip()
         yearFrom = billDateFrom.split('/')[0]
         yearTo = billDateTo.split('/')[0]
         sameYear = False
@@ -48,7 +48,7 @@ class CMBCreditReader(BankReader):
                 transType = 'payout'
             memo = columns[3].find('font').text
             detail = {
-                'date':accDate,
+                'date':accDate.strip(),
                 'time':'080000',
                 'amount':amt,
                 'balance':0,
