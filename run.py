@@ -5,8 +5,7 @@ from CCBReader import CCBReader
 from ABCCreditReader import ABCCreditReader
 from BOCCreditReader import BOCCreditReader
 from CMBCreditReader import CMBCreditReader
-from sui import Sui
-import gmail
+from shenxiang import ShenxiangClient
 import re
 def readConfig():
     with open('conf.json', encoding='utf-8') as conf:
@@ -66,6 +65,16 @@ def findSuiDetail(bankDetail, suiDetails, suiid):
     return None
 def transDate(date):
     return date[0:4] + '.' + date[4:6] + '.' + date[6:8]
+def buildPayTime(date, time):
+    """组装 'YYYY-MM-DD HH:MM'。
+
+    银行账单部分条目只有日期没有时间(如农行 xlsx),此时时间统一补 08:00,
+    避免落到当前时间导致记账日期变成今天。
+    """
+    t = (time or '').replace(':', '')
+    if len(t) < 4:
+        t = '0800'
+    return "%s-%s-%s %s:%s" % (date[0:4], date[4:6], date[6:8], t[0:2], t[2:4])
 def confirmMemo(memo):
     answer = input('是否备注-('+memo+')?,y/n ')
     if answer == 'y' or answer == 'Y' or answer == '':
@@ -152,7 +161,7 @@ config = None
 if __name__ == "__main__":
     config = readConfig()
     checkRulesExp()
-    sui = Sui(config)
+    sui = ShenxiangClient(config)
     sui.login()
     sui.initTallyInfo()
     sui.printAccounts()
@@ -171,6 +180,7 @@ if __name__ == "__main__":
             # print(bankDetail)
     input('本地账单读取完成')
     if config['gmail']:
+        import gmail  # 仅在需要读账单邮件时加载(依赖 google api)
         g = gmail.Gmail(config)
         messages = g.getTallyMails()
         for message in messages:
@@ -199,9 +209,8 @@ if __name__ == "__main__":
                 print("未记账条目：")
                 printBankDetail(bankDetail)
                 date = bankDetail['date']
-                time = bankDetail['time']
-                payTime = "%s-%s-%s %s:%s" % (
-                    date[0:4], date[4:6], date[6:8], time[0:2], time[2:4])
+                time = bankDetail.get('time')
+                payTime = buildPayTime(date, time)
                 rule = checkRules(bankDetail, bank['bankno'], suiid)
                 if rule != None:
                     print("自动记账 - ", rule['exp'])

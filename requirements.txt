@@ -1,0 +1,8 @@
+requests
+beautifulsoup4
+openpyxl
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+httplib2
+monthdelta

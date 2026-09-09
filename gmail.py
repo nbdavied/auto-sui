@@ -6,7 +6,14 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from google_auth_httplib2 import AuthorizedHttp
 import httplib2
+from httplib2 import socks
+import socket
 import base64
+
+from configReader import readConfig
+
+socket.socket = socks.socksocket
+socks.setdefaultproxy(socks.PROXY_TYPE_SOCKS5, '127.0.0.1', 10808)
 # If modifying these scopes, delete the file token.pickle.
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 class Gmail():
@@ -36,13 +43,13 @@ class Gmail():
                 pickle.dump(creds, token)
 
         # Configure httplib2 to use a local SOCKS5 proxy so DNS and HTTP go through the proxy.
-        proxy_info = httplib2.ProxyInfo(proxy_type=httplib2.socks.PROXY_TYPE_SOCKS5,
-                        proxy_host='127.0.0.1', proxy_port=10808,
+        proxy_info = httplib2.ProxyInfo(proxy_type=httplib2.socks.PROXY_TYPE_HTTP,
+                        proxy_host='127.0.0.1', proxy_port=10809,
                         proxy_rdns=True)
         http = httplib2.Http(proxy_info=proxy_info)
         authed_http = AuthorizedHttp(creds, http=http)
         # Pass the authorized, proxied http object into googleapiclient so requests use the proxy.
-        self.__service = build('gmail', 'v1', http=authed_http, cache_discovery=False)
+        self.__service = build('gmail', 'v1', credentials=creds)
 
     def getTallyMails(self):
         results = self.__service.users().messages().list(
@@ -96,3 +103,9 @@ class Gmail():
             return None
     def getService(self):
         return self.__service
+    
+if __name__ == "__main__":
+    config = readConfig()
+    g = Gmail(config)
+    mails = g.getTallyMails()
+    print(mails)

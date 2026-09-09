@@ -1,6 +1,23 @@
 conf.json
+~conf.json.bak
 token.pickle
 credentials.json
+
+# 抓包产物:含登录 token / cookie / 密码哈希,禁止入库
+captures/
+*.har
+
+# 运行时生成的清单(含账户 id 等个人数据,可用脚本重新生成)
+accounts.json
+
+# WorkBuddy 工作区数据(含账本 id 等笔记)
+.workbuddy/
+
+# 银行账单(个人流水)
+bankdetails/
+*.xls
+*.xlsx
+~$*.xlsx
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -131,7 +148,4 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-*.xls
-*.xlsx
 test.py
-bankdetails/
