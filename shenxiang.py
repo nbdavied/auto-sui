@@ -191,6 +191,52 @@ class ShenxiangClient:
         self.__initCategories()
         self.__initMembers()
 
+    def setBookId(self, bookId):
+        """切换当前操作的账本(登录后选账本时用)。"""
+        self.__bookId = str(bookId)
+
+    def getBookId(self):
+        return self.__bookId
+
+    def getBooks(self):
+        """返回当前账号的账本列表 [{id, name}]。
+
+        实测可用接口: GET /cab-index-ws/v3/book-group/cloud -> {cloud_book_list: [...]}
+        """
+        paths = [
+            "/cab-index-ws/v3/book-group/cloud",
+            "/cab-config-ws/v2/account-books",
+        ]
+        for path in paths:
+            try:
+                r = self.__get(path)
+                if r.status_code != 200:
+                    continue
+                data = r.json()
+                arr = None
+                for key in ("cloud_book_list", "book_list", "data"):
+                    v = data.get(key)
+                    if isinstance(v, list) and v:
+                        arr = v
+                        break
+                    if isinstance(v, dict):
+                        arr = v.get("books") or v.get("list") or []
+                        if arr:
+                            break
+                if not arr:
+                    continue
+                books = []
+                for b in arr:
+                    bid = b.get("id") or b.get("book_id")
+                    name = b.get("name") or b.get("book_name")
+                    if bid:
+                        books.append({"id": str(bid), "name": name or str(bid)})
+                if books:
+                    return books
+            except Exception:
+                continue
+        return []
+
     def __initAccounts(self):
         r = self.__get("/cab-config-ws/v2/account-book/accounts",
                        params={"scene": "Accounting", "operation_codes": "C"})
@@ -437,6 +483,8 @@ class ShenxiangClient:
     def deleteTransaction(self, tranId):
         """删除单笔流水。"""
         return self.deleteTransactions([tranId])
+
+    def accountDetail(self, accountId, beginDate, endDate):
         """查询某账户在日期区间内的流水,返回与老 sui 兼容的结构。
 
         每条: {sdate, itemAmount, tranType, tranId, sellerAcountId, buyerAcountId}

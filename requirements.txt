@@ -1,8 +1,15 @@
 requests
 beautifulsoup4
 openpyxl
+monthdelta
+
+# Web 服务
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Gmail 账单读取（不用 Gmail 功能可不装）
 google-api-python-client
 google-auth-oauthlib
 google-auth-httplib2
 httplib2
-monthdelta

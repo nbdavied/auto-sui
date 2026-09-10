@@ -10,6 +10,12 @@ captures/
 # 运行时生成的清单(含账户 id 等个人数据,可用脚本重新生成)
 accounts.json
 
+# Web 版: 构建产物、依赖、本地数据库
+web/dist/
+web/node_modules/
+autosui.db
+credentials.json
+
 # WorkBuddy 工作区数据(含账本 id 等笔记)
 .workbuddy/
 
