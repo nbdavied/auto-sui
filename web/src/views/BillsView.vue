@@ -32,18 +32,20 @@
         <el-tab-pane label="Gmail 账单" name="gmail">
           <div class="gmail-bar">
             <el-tag :type="gmailOk ? 'success' : 'info'">
-              {{ gmailOk ? '已授权' : '未授权' }}
+              {{ gmailOk ? '已授权（保存在本机）' : '未授权' }}
             </el-tag>
             <el-button size="small" @click="gmailAuth">授权 / 重新授权</el-button>
             <el-button size="small" :disabled="!gmailOk" :loading="loading"
                        @click="loadMails">读取账单邮件</el-button>
             <el-button size="small" type="primary" :disabled="!selectedMails.length"
                        :loading="loading" @click="loadSelected">加载所选</el-button>
+            <el-button size="small" type="danger" plain :disabled="!gmailOk"
+                       @click="gmailRevoke">删除授权</el-button>
           </div>
           <el-table v-if="mails.length" :data="mails" size="small" style="margin-top:12px"
                     @selection-change="s => selectedMails = s">
             <el-table-column type="selection" width="46" />
-            <el-table-column prop="date" label="日期" width="200" />
+            <el-table-column prop="date" label="日期" width="110" />
             <el-table-column prop="subject" label="主题" show-overflow-tooltip />
           </el-table>
         </el-tab-pane>
@@ -109,10 +111,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import TallyDialog from '../components/TallyDialog.vue'
-import { state, api, saveLocal, formatDate } from '../api.js'
+import { state, api, formatDate, getGmailCreds, saveGmailCreds, clearGmailCreds } from '../api.js'
 
 const emit = defineEmits(['logout', 'switch-book'])
 
@@ -121,7 +123,8 @@ const file = ref(null)
 const loading = ref(false)
 const mails = ref([])
 const selectedMails = ref([])
-const gmailOk = ref(false)
+// 凭据存在共享 state 里: 授权回调后父组件领取凭据,这里会自动更新
+const gmailOk = computed(() => !!state.gmailCreds)
 const dialogVisible = ref(false)
 const currentDetail = ref(null)
 const currentIndex = ref(-1)
@@ -135,8 +138,6 @@ onMounted(async () => {
     const r = await api.categories(state.sid)
     state.categories = r.categories
   }
-  const g = await api.gmailStatus(state.sid)
-  gmailOk.value = g.authorized
 })
 
 function onFileChange(uploadFile) {
@@ -252,27 +253,46 @@ async function gmailAuth() {
 async function loadMails() {
   loading.value = true
   try {
-    const r = await api.gmailMails(state.sid)
+    const r = await api.gmailMails(state.sid, getGmailCreds())
+    saveGmailCreds(r.creds)
     mails.value = r.mails
     if (!r.mails.length) ElMessage.info('没有找到账单邮件')
   } catch (e) {
-    ElMessage.error(e.response?.data?.detail || '读取邮件失败')
+    handleGmailError(e, '读取邮件失败')
   } finally {
     loading.value = false
   }
 }
 
+// 401 表示 refresh_token 已失效(被撤销/过期),此时本地凭据没用了,清掉并引导重授权
+function handleGmailError(e, fallback) {
+  if (e.response?.status === 401) {
+    clearGmailCreds()
+    mails.value = []
+  }
+  ElMessage.error(e.response?.data?.detail || fallback)
+}
+
+async function gmailRevoke() {
+  clearGmailCreds()
+  mails.value = []
+  selectedMails.value = []
+  ElMessage.success('已删除本机保存的 Gmail 授权')
+}
+
 async function loadSelected() {
   loading.value = true
   try {
-    const r = await api.gmailLoad(state.sid, selectedMails.value.map(m => m.id), state.suiid)
+    const r = await api.gmailLoad(state.sid, selectedMails.value.map(m => m.id),
+                                  state.suiid, getGmailCreds())
+    saveGmailCreds(r.creds)
     state.bankno = r.bankno
     state.bills = r.details.map(d => ({ ...d, status: 'pending' }))
     state.source = 'gmail'
     if (state.suiid) await doReconcile()
     else ElMessage.warning('请先选择记账账户')
   } catch (e) {
-    ElMessage.error(e.response?.data?.detail || '加载失败')
+    handleGmailError(e, '加载失败')
   } finally {
     loading.value = false
   }

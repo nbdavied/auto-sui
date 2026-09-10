@@ -8,7 +8,28 @@ const KEY = {
   password: 'autosui.password',
   bookId: 'autosui.bookId',
   bookName: 'autosui.bookName',
-  selecting: 'autosui.selecting'
+  selecting: 'autosui.selecting',
+  gmailCreds: 'autosui.gmailCreds'
+}
+
+// Gmail OAuth 凭据存在浏览器本地,目的就是「一次授权长期有效」。
+// 因此退出登录/切换账本都不清除它,只有用户点「删除授权」才清。
+//
+// 放进 reactive state 而不只是 localStorage: 授权回调回来时子组件会先于父组件
+// 挂载(父组件才负责领取凭据),读 localStorage 会拿到旧值而误显示「未授权」。
+export function getGmailCreds() {
+  return localStorage.getItem(KEY.gmailCreds) || ''
+}
+
+export function saveGmailCreds(json) {
+  if (!json) return
+  localStorage.setItem(KEY.gmailCreds, json)
+  state.gmailCreds = json
+}
+
+export function clearGmailCreds() {
+  localStorage.removeItem(KEY.gmailCreds)
+  state.gmailCreds = ''
 }
 
 // 用户主动「切换账本」时置位,选完账本清除。
@@ -34,7 +55,8 @@ export const state = reactive({
   bills: [],
   bankno: '',
   suiid: '',
-  source: ''
+  source: '',
+  gmailCreds: localStorage.getItem(KEY.gmailCreds) || ''
 })
 
 export function saveLocal(patch = {}) {
@@ -47,7 +69,11 @@ export function saveLocal(patch = {}) {
 }
 
 export function clearLocal() {
-  Object.values(KEY).forEach(k => localStorage.removeItem(k))
+  Object.values(KEY).forEach(k => {
+    // Gmail 凭据跨登录保留,避免退出后又要重新授权
+    if (k === KEY.gmailCreds) return
+    localStorage.removeItem(k)
+  })
   state.sid = ''
   state.bookId = ''
   state.bookName = ''
@@ -110,11 +136,15 @@ export const api = {
   gmailAuthUrl(sid) {
     return http.get('/gmail/auth-url', { params: { sid } })
   },
-  gmailMails(sid) {
-    return http.get('/gmail/mails', { params: { sid } })
+  // 授权完成后把凭据从后端领回,存到浏览器
+  gmailClaim(sid) {
+    return http.post('/gmail/claim', { sid })
   },
-  gmailLoad(sid, messageIds, suiid) {
-    return http.post('/gmail/load', { sid, messageIds, suiid })
+  gmailMails(sid, creds, maxResults = 30) {
+    return http.post('/gmail/mails', { sid, creds, maxResults })
+  },
+  gmailLoad(sid, messageIds, suiid, creds) {
+    return http.post('/gmail/load', { sid, messageIds, suiid, creds })
   }
 }
 

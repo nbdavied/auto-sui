@@ -293,12 +293,43 @@ def delRule(ruleId: int, sid: str):
 # --------------------------------------------------------------------- #
 # Gmail
 # --------------------------------------------------------------------- #
+def resolveGmailCreds(s, credsJson=None):
+    """取本次请求要用的 Gmail 凭据。
+
+    优先用浏览器传回来的凭据(持久化在浏览器,跨登录/跨进程都有效);
+    没传则退回会话内的凭据(刚授权完、还没被领走的那一瞬)。
+    """
+    from server import gmail_service
+    creds = gmail_service.credsFromJson(credsJson)
+    if creds is not None:
+        return creds
+    return s.get("gmailCreds")
+
+
+class GmailClaimBody(BaseModel):
+    sid: str
+
+
+@app.post("/api/gmail/claim")
+def gmailClaim(body: GmailClaimBody):
+    """授权完成后,前端来把凭据领走存到浏览器。
+
+    领取即从会话移除(一次性),服务端不留副本 —— 凭据的最终归宿是浏览器。
+    """
+    s = getSession(body.sid)
+    creds = s.pop("gmailCreds", None) if s else None
+    if creds is None:
+        raise HTTPException(status_code=404, detail="没有待领取的授权凭据")
+    from server import gmail_service
+    return ok(creds=gmail_service.credsToJson(creds))
+
+
 @app.get("/api/gmail/status")
 def gmailStatus(sid: str):
     s = getSession(sid)
     from server import gmail_service
     # proxy 一并返回: 国内网络下 Gmail 授权失败多半是没配代理
-    return ok(authorized=bool(s.get("gmailCreds")),
+    return ok(authorized=bool(s and s.get("gmailCreds")),
               configured=gmail_service.isConfigured(),
               proxy=gmail_service.proxyInfo())
 
@@ -349,36 +380,51 @@ def gmailCallback(request: Request, code: str = "", state: str = "",
     return RedirectResponse("%s/?gmail=ok&sid=%s" % (frontend, state))
 
 
-@app.get("/api/gmail/mails")
-def gmailMails(sid: str, maxResults: int = 30):
-    s = getSession(sid)
-    creds = s.get("gmailCreds")
+class GmailMailsBody(BaseModel):
+    sid: str
+    creds: Optional[str] = None
+    maxResults: int = 30
+
+
+@app.post("/api/gmail/mails")
+def gmailMails(body: GmailMailsBody):
+    """列账单邮件。凭据由浏览器提供,续期后回传新凭据供前端覆盖保存。"""
+    s = getSession(body.sid)
+    creds = resolveGmailCreds(s, body.creds)
     if not creds:
         raise HTTPException(status_code=401, detail="Gmail 未授权")
     from server import gmail_service
     try:
         creds = gmail_service.refreshIfNeeded(creds)
+    except Exception:
+        # refresh_token 被撤销/过期: 前端据此清除本地凭据并引导重新授权
+        raise HTTPException(status_code=401, detail="Gmail 授权已失效，请重新授权")
+    try:
         service = gmail_service.buildService(creds)
-        mails = gmail_service.listTallyMails(service, maxResults)
+        mails = gmail_service.listTallyMails(service, body.maxResults)
     except Exception as e:
         raise HTTPException(status_code=400, detail="读取邮件失败: %s" % e)
-    return ok(mails=mails)
+    return ok(mails=mails, creds=gmail_service.credsToJson(creds))
 
 
 class GmailLoadBody(BaseModel):
     sid: str
     messageIds: List[str]
     suiid: Optional[str] = None
+    creds: Optional[str] = None
 
 
 @app.post("/api/gmail/load")
 def gmailLoad(body: GmailLoadBody):
     s = getSession(body.sid)
-    creds = s.get("gmailCreds")
+    creds = resolveGmailCreds(s, body.creds)
     if not creds:
         raise HTTPException(status_code=401, detail="Gmail 未授权")
     from server import gmail_service
-    creds = gmail_service.refreshIfNeeded(creds)
+    try:
+        creds = gmail_service.refreshIfNeeded(creds)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Gmail 授权已失效，请重新授权")
     service = gmail_service.buildService(creds)
 
     details = []
@@ -409,7 +455,8 @@ def gmailLoad(body: GmailLoadBody):
                     "details": details}
     return ok(bankno=bankno, suiid=body.suiid or "",
               startDate=startDate, endDate=endDate,
-              count=len(details), details=details)
+              count=len(details), details=details,
+              creds=gmail_service.credsToJson(creds))
 
 
 @app.get("/api/health")

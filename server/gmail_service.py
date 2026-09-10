@@ -16,7 +16,10 @@ from googleapiclient.discovery import build                    # noqa: E402
 from google_auth_oauthlib.flow import Flow                     # noqa: E402
 from google.auth.transport.requests import Request             # noqa: E402
 from google_auth_httplib2 import AuthorizedHttp                # noqa: E402
+from google.oauth2.credentials import Credentials              # noqa: E402
 import httplib2                                                # noqa: E402
+import json                                                    # noqa: E402
+from email.utils import parsedate_to_datetime                  # noqa: E402
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 CREDENTIALS_PATH = os.environ.get("GOOGLE_CREDENTIALS",
@@ -112,6 +115,33 @@ def refreshIfNeeded(creds):
     return creds
 
 
+# --------------------------------------------------------------------- #
+# 凭据序列化
+#
+# 默认凭据只活在服务端会话里(进程重启即失效,每次都要重新授权)。
+# 用户希望「一次授权长期有效」,所以支持把凭据交给浏览器保存:
+#   - credsToJson: 交给前端存本地
+#   - credsFromJson: 前端每次请求带回来,后端还原成 Credentials
+# access_token 过期时后端会自动用 refresh_token 续期,并把续期后的凭据
+# 一并返回,前端覆盖保存即可 —— 所以只要 refresh_token 有效就无需重新授权。
+# --------------------------------------------------------------------- #
+def credsToJson(creds):
+    if creds is None:
+        return ""
+    return creds.to_json()
+
+
+def credsFromJson(text):
+    """从前端传回的 JSON 还原凭据;格式不对返回 None。"""
+    if not text:
+        return None
+    try:
+        info = json.loads(text)
+        return Credentials.from_authorized_user_info(info, SCOPES)
+    except Exception:
+        return None
+
+
 def buildService(creds):
     """构造 Gmail API client。
 
@@ -123,11 +153,33 @@ def buildService(creds):
                  cache_discovery=False)
 
 
+def formatMailDate(value):
+    """把 RFC 2822 邮件头日期转成 yyyy/MM/dd。
+
+    邮件头形如 "Wed, 10 Sep 2026 09:00:00 +0800",直接截字符串会在跨时区
+    或英文月份时出错,所以按协议解析。带时区的一律换算到本机时区,
+    避免海外账单邮件因时差显示成前一天。
+    """
+    if not value:
+        return ""
+    try:
+        dt = parsedate_to_datetime(value)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone()
+        return dt.strftime("%Y/%m/%d")
+    except Exception:
+        return (value or "")[:10]
+
+
 def listTallyMails(service, maxResults=30):
-    """列出账单邮件(带主题/日期,供用户勾选)。"""
+    """列出收件箱里的账单邮件(带主题/日期,供用户勾选)。
+
+    labelIds=['INBOX'] 限定只搜收件箱 —— Gmail 的「归档」本质就是移除
+    INBOX 标签,所以不加这个限定会把已归档的历史账单也翻出来。
+    """
     q = " OR ".join("from:%s" % s for s in BILL_SENDERS)
     results = service.users().messages().list(
-        userId="me", q=q, maxResults=maxResults).execute()
+        userId="me", q=q, labelIds=["INBOX"], maxResults=maxResults).execute()
     messages = results.get("messages", [])
     out = []
     for m in messages:
@@ -140,7 +192,7 @@ def listTallyMails(service, maxResults=30):
             "id": m["id"],
             "subject": headers.get("Subject", ""),
             "from": headers.get("From", ""),
-            "date": headers.get("Date", ""),
+            "date": formatMailDate(headers.get("Date", "")),
         })
     return out
 

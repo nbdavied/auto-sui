@@ -34,10 +34,18 @@ python run_server.py            # 直接访问 http://127.0.0.1:8000
 |---|---|---|
 | 随手记账号密码 | 浏览器本地 | 服务端不存密码，只在内存中换 token |
 | 神象云 token | 服务端内存 | 会话级，进程重启即失效 |
-| Gmail OAuth token | 服务端内存 | 会话级，不写 token.pickle |
+| Gmail OAuth token | 浏览器本地 | 一次授权长期有效；服务端只在授权瞬间中转 |
 | 账户映射 / 记账规则 | SQLite（autosui.db） | 只有配置，没有密码 |
 
 **因为要传密码，正式部署必须上 HTTPS**，否则密码在链路上是明文。用 Nginx 反代 + Let's Encrypt 证书即可。
+
+### Gmail 凭据的生命周期
+
+授权完成后，前端调 `/api/gmail/claim` 把凭据领回存到浏览器本地，服务端随即删除自己的副本。之后每次读邮件，前端把凭据随请求带上；access_token 过期时服务端自动用 refresh_token 续期，并把续期后的凭据回传、前端覆盖保存。
+
+所以只要 refresh_token 有效（通常长期有效，除非用户主动撤销），**退出登录、关闭浏览器、重启服务都不需要重新授权**。
+
+想撤销就在 Gmail 标签页点「删除授权」，会清除本机保存的凭据（不影响 Google 账号侧的授权记录，要彻底撤销需到 Google 账号设置的「第三方应用访问权限」里移除）。
 
 ## 三、Gmail 账单功能配置
 
@@ -113,8 +121,10 @@ PORT=8000
 | POST | /api/reconcile | 对账，返回每条状态 |
 | POST | /api/tally | 记账 |
 | GET · POST · DELETE | /api/rules | 自动记账规则 |
-| GET | /api/gmail/auth-url · /api/gmail/mails | Gmail 授权与邮件列表 |
-| POST | /api/gmail/load | 加载所选邮件里的账单 |
+| GET | /api/gmail/auth-url | 生成 Gmail 授权地址 |
+| POST | /api/gmail/claim | 授权后把凭据领回浏览器（一次性） |
+| POST | /api/gmail/mails | 账单邮件列表（body 带凭据） |
+| POST | /api/gmail/load | 加载所选邮件里的账单（body 带凭据） |
 
 ## 六、测试
 
