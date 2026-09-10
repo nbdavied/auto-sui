@@ -17,6 +17,32 @@
         </div>
         <el-button type="primary" :loading="loading" style="width:100%;margin-top:12px"
                    @click="doLogin">登录</el-button>
+
+        <!--
+          服务端风控会给密码登录塞图形验证码(code 4099)。浏览器会话里那颗
+          access_token 仍然有效,填进来可以直接接管,不用做验证码流程。
+        -->
+        <div class="token-section">
+          <el-button link type="primary" @click="showToken = !showToken">
+            {{ showToken ? '收起' : '密码登录失败？用 access_token 登录' }}
+          </el-button>
+          <div v-if="showToken" class="token-box">
+            <ol class="token-steps">
+              <li>浏览器打开并登录
+                <el-link type="primary" href="https://www.feidee.com/cloud/"
+                         target="_blank">神象云网页版</el-link>
+              </li>
+              <li>按 F12 打开控制台，粘贴下面这行回车：</li>
+            </ol>
+            <div class="cmd" @click="copyCmd">
+              <code>copy(localStorage.Authorization)</code>
+              <span class="copy-hint">{{ copied ? '已复制' : '点击复制' }}</span>
+            </div>
+            <div class="token-steps">最后把结果粘贴到下面：</div>
+            <el-input v-model="shenxiangToken" type="textarea" :rows="3"
+                      placeholder="粘贴 access_token" />
+          </div>
+        </div>
       </el-form>
 
       <div v-else>
@@ -57,6 +83,21 @@ const picked = ref('')
 
 const forceSelect = ref(isSelecting())
 
+// 图形验证码旁路:浏览器登录态里扒出来的神象云 access_token
+const showToken = ref(false)
+const shenxiangToken = ref('')
+const copied = ref(false)
+
+async function copyCmd() {
+  try {
+    await navigator.clipboard.writeText('copy(localStorage.Authorization)')
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 1500)
+  } catch (e) {
+    ElMessage.warning('复制失败,请手动选中下方命令')
+  }
+}
+
 function providerLabel(p) {
   return p === 'legacy' ? '旧版' : '神象云'
 }
@@ -95,13 +136,16 @@ onMounted(async () => {
 })
 
 async function doLogin() {
-  if (!username.value || !password.value) {
-    ElMessage.warning('请输入账号和密码')
+  const tok = shenxiangToken.value.trim()
+  // 有 token 时不需要密码 —— token 本身就代表已经登录过了
+  if (!username.value || (!password.value && !tok)) {
+    ElMessage.warning('请输入账号，以及密码或 access_token')
     return
   }
   loading.value = true
   try {
-    const r = await api.login(username.value, password.value)
+    const tok = shenxiangToken.value.trim()
+    const r = await api.login(username.value, password.value, tok)
     saveLocal({
       sid: r.sid,
       username: remember.value ? username.value : '',
@@ -198,5 +242,44 @@ h2 {
 }
 .book-tag {
   margin-left: 4px;
+}
+.token-section {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #ebeef5;
+  text-align: left;
+}
+.token-box {
+  margin-top: 8px;
+}
+.token-steps {
+  margin: 6px 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: #606266;
+  line-height: 1.8;
+}
+.cmd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  background: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+.cmd code {
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  color: #303133;
+  word-break: break-all;
+}
+.copy-hint {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #909399;
 }
 </style>

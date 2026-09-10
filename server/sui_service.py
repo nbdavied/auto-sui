@@ -24,6 +24,21 @@ def createClient(username, password, bookId=""):
     return client
 
 
+def createClientFromToken(token, bookId=""):
+    """用浏览器里已有的 access_token 构造客户端,跳过密码登录。
+
+    存在意义:服务端风控会给 OAuth 密码登录塞图形验证码(code 4099),
+    但浏览器会话里那颗 token 依然有效。把它灌进来即可复用全部业务接口。
+    """
+    client = ShenxiangClient({
+        "username": "",
+        "password": "",
+        "bookId": bookId or "",
+    })
+    client.setToken(token.strip())
+    return client
+
+
 def selectBook(client, bookId):
     """切换账本并拉取账户/分类/成员。"""
     client.setBookId(bookId)

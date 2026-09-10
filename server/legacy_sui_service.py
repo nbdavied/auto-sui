@@ -3,11 +3,13 @@
 
 要点:
   - 每个会话持有一个已登录的 Sui 实例(内存),不落库
-  - 旧体系只有一本书(bookId 写死在 sui.py 内),不需要 getBooks 多分页
+  - 账本清单不由这里提供:由 tally.feidee.net/mini_program/v1/books/list 动态获取,
+    本模块只负责「拿到某个旧账本 id 后切换到它」
   - 所有数据访问都走 sui.py 原方法,不重复实现
   - 类别下钻(subCat)沿用 sui.py 原生结构,前端级联不需要特殊处理
 """
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -15,10 +17,39 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # sui.py 在项目根目录,与 shenxiang.py 平级
 from sui import Sui  # noqa: E402
 
-# 旧随手记只有一个账本,这个 id 在 sui.py:__authRedirect / initTallyInfo 里写死
+# 未显式指定账本时的回落值(sui.py 里的 DEFAULT_BOOK_ID 与之相同)
 LEGACY_BOOK_ID = "1505498391"
-LEGACY_BOOK_NAME = "旧随手记账本"
-LEGACY_PROVIDER = "legacy"
+
+# 错误页里通常夹带一个错误码,定位问题比「记账失败」有用得多
+_ERROR_CODE_RE = re.compile(r"错误代码[:：]?\s*<[^>]*>([^<]+)<|错误代码[:：]?\s*([\w\-]+)")
+_TRAN_ID_RE = re.compile(r"\d{6,}")
+
+
+def _checkResult(r, opLabel):
+    """把 sui.py 的 HTTP 响应当成「成功 / 失败」来判。
+
+    sui.py 原来只 print 响应体,服务端报错(返回整张 HTML 错误页)时调用方
+    完全无感知 —— 页面上显示"记账成功",账本里却什么都没有。这是当前最大的
+    silent-failure 入口。
+
+    成功响应形如 {id:{id:134923109120449},budget:0,price:0.01}(开头是 `{`,
+    含 `id`)。失败响应是一整张带"出错啦"的 HTML 页(以 `<` 开头)。
+    """
+    if r is None:
+        raise RuntimeError("%s: 没有收到服务端响应" % opLabel)
+    if getattr(r, "status_code", 0) not in (200, 201):
+        raise RuntimeError("%s: 服务端返回 HTTP %s" % (opLabel, getattr(r, "status_code", "?")))
+    text = (getattr(r, "text", "") or "").strip()
+    if not text or not text.startswith("{"):
+        # 错误页里的错误码是最有用的线索 —— 截一小段出来
+        code = ""
+        m = _ERROR_CODE_RE.search(text)
+        if m:
+            code = m.group(1) or m.group(2) or ""
+        hint = "错误代码 %s" % code if code else "服务端拒绝记账(很可能是账户 ID 或分类 ID 不存在)"
+        raise RuntimeError("%s 被随手记拒绝: %s" % (opLabel, hint))
+    match = _TRAN_ID_RE.search(text)
+    return {"status_code": 200, "text": text[:200], "tranId": match.group(0) if match else ""}
 
 
 def createClient(username, password):
@@ -34,20 +65,19 @@ def createClient(username, password):
     return client
 
 
-def listBooks():
-    """旧体系只有一个账本;返回 shape 与神象云保持一致,便于前端按 provider 路由。"""
-    return [{
-        "id": LEGACY_BOOK_ID,
-        "name": LEGACY_BOOK_NAME,
-        "provider": LEGACY_PROVIDER,
-    }]
+def selectBook(client, bookId):
+    """切换到指定的旧账本,并重新拉取该账本的账户 / 分类。
 
-
-def selectBook(_client, _bookId):
-    """旧体系无需切换:login 阶段已经把当前账本的账户/分类加载好了。
-    保留这个函数让 main.py / sui_service.py 接口对齐。
+    旧体系「当前账本」存在服务端会话里,切换后必须重跑 initTallyInfo,
+    否则拿回的还是上一个账本的数据 —— 账户和分类是对不上的。
     """
-    return {}
+    if not client:
+        raise RuntimeError("旧体系未登录")
+    client.initTallyInfo(bookId or LEGACY_BOOK_ID)
+    return {
+        "accounts": buildAccountOptions(client),
+        "categories": buildCategoryOptions(client),
+    }
 
 
 def _accounts(client):
@@ -93,15 +123,39 @@ def buildCategoryOptions(client):
             "payout": conv(_categories(client, "_Sui__payoutCategories"))}
 
 
+def accountExists(client, accountId):
+    """对账 / 记账前先核对一下:这个 id 是不是当前账本里的账户。
+
+    不然上传账单时若 conf.json 把神象云 id 错填过来,我们会拿一个「当前账本里
+    不存在」的 account 去查流水,得到空列表 → 全部显示成未记账;再把它喂给
+    payout,服务端会返回错误页 —— 而我们之前根本不知道。这就是用户看到的
+    「已记账条目没有正确显示、记账操作也没有成功」。
+    """
+    if not accountId:
+        return True   # 空 id 当作「未指定」,由前端兜底
+    target = str(accountId)
+    for a in _accounts(client):
+        if str(a.get("id", "")) == target:
+            return True
+    return False
+
+
 def payout(client, account, price, category, payTime=None, memo=""):
-    """旧随手记支出记账。payTime / memo 与 shenxiang 同义。"""
-    # sui.payout 内部会在 payTime is None 时用本地时间兜底
-    client.payout(account, price, category, payTime=payTime, memo=memo)
+    """旧随手记支出记账。payTime / memo 与 shenxiang 同义。
+
+    返回值是 `{status_code, text, tranId}` 的字典,失败抛 RuntimeError
+    —— 失败信息包含服务端错误码,便于快速定位。
+    """
+    return _checkResult(
+        client.payout(account, price, category, payTime=payTime, memo=memo),
+        "支出记账")
 
 
 def income(client, account, price, category, payTime=None, memo=""):
     """旧随手记收入记账。"""
-    client.income(account, price, category, payTime=payTime, memo=memo)
+    return _checkResult(
+        client.income(account, price, category, payTime=payTime, memo=memo),
+        "收入记账")
 
 
 def transfer(client, out_account, in_account, price, payTime=None, memo=""):
@@ -110,4 +164,6 @@ def transfer(client, out_account, in_account, price, payTime=None, memo=""):
     注:sui.py:transfer 的参数顺序是 (out_account, in_account, price, ...)
     与神象云一致;不再额外调换。
     """
-    client.transfer(out_account, in_account, price, payTime=payTime, memo=memo)
+    return _checkResult(
+        client.transfer(out_account, in_account, price, payTime=payTime, memo=memo),
+        "转账记账")

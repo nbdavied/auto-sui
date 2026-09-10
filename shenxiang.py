@@ -60,6 +60,8 @@ BIZ_SECRET = "pQhGxs0I84zQgeU8"
 
 AUTH_BASE = "https://auth.feidee.net"
 BIZ_BASE = "https://yun.feidee.net"
+# 小程序侧接口域名,账本清单 books/list 在这里(不在 BIZ_BASE 上)
+TALLY_BASE = "https://tally.feidee.net"
 
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36 Edg/139.0.0.0")
@@ -241,6 +243,69 @@ class ShenxiangClient:
             except Exception:
                 continue
         return []
+
+    # ------------------------------------------------------------------ #
+    # 账本清单
+    # ------------------------------------------------------------------ #
+    def setToken(self, token, tokenType="Bearer"):
+        """注入一个已有的 access_token,跳过密码登录。
+
+        服务端风控会要求图形验证码导致 OAuth 登录失败(4099),但浏览器里
+        已经登录成功的会话仍持有合法 token。把它灌进来即可复用全部业务接口。
+        """
+        self.__token = token
+        self.__tokenType = tokenType
+
+    def listAllBooks(self):
+        """拉取「全部账本」清单:GET tally.feidee.net/mini_program/v1/books/list
+
+        与 getBooks() 的区别:
+          - getBooks()    走 cab-index-ws,只返回神象云(新体系)账本
+          - listAllBooks() 走小程序接口,会带上旧随手记迁移过来的老账本
+
+        返回 [{id, name, raw, ...}],raw 保留服务端原始字段便于按来源归类。
+        """
+        r = self.rawRequest(
+            "GET", "/mini_program/v1/books/list", baseUrl=TALLY_BASE)
+        if r.status_code != 200:
+            try:
+                msg = r.json().get("message") or r.text[:200]
+            except Exception:
+                msg = r.text[:200]
+            raise RuntimeError("账本清单接口返回 %s: %s" % (r.status_code, msg))
+        data = r.json()
+
+        # 响应外层可能套 {data: [...]} / {books: [...]} / 直接是数组,逐个试
+        arr = None
+        if isinstance(data, list):
+            arr = data
+        elif isinstance(data, dict):
+            for key in ("data", "books", "book_list", "list"):
+                v = data.get(key)
+                if isinstance(v, list):
+                    arr = v
+                    break
+                if isinstance(v, dict):
+                    for sub in ("books", "book_list", "list"):
+                        if isinstance(v.get(sub), list):
+                            arr = v[sub]
+                            break
+                    if arr:
+                        break
+        if arr is None:
+            raise RuntimeError("账本清单接口返回结构无法识别: %s"
+                               % json.dumps(data, ensure_ascii=False)[:200])
+
+        books = []
+        for b in arr:
+            if not isinstance(b, dict):
+                continue
+            bid = b.get("id") or b.get("book_id") or b.get("bookId")
+            if bid in (None, ""):
+                continue
+            name = b.get("name") or b.get("book_name") or b.get("bookName") or str(bid)
+            books.append({"id": str(bid), "name": name, "raw": b})
+        return books
 
     def __initAccounts(self):
         r = self.__get("/cab-config-ws/v2/account-book/accounts",
@@ -446,9 +511,12 @@ class ShenxiangClient:
             pageOffset += pageSize
         return items
 
-    def rawRequest(self, method, path, body=None, extraHeaders=None):
-        """发一个带签名的业务请求,返回 Response(用于探测未封装的接口,如删除)。"""
-        url = BIZ_BASE + path
+    def rawRequest(self, method, path, body=None, extraHeaders=None, baseUrl=None):
+        """发一个带签名的业务请求,返回 Response(用于探测未封装的接口,如删除)。
+
+        baseUrl 留空时用 BIZ_BASE;books/list 这类接口在 TALLY_BASE 上,需要显式传。
+        """
+        url = (baseUrl or BIZ_BASE) + path
         headers = self.__bizHeaders()
         if extraHeaders:
             headers.update(extraHeaders)

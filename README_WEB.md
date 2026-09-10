@@ -99,7 +99,14 @@ PORT=8000
 
 ## 四、页面流程
 
-1. **登录**：输入随手记账号密码 → 选择账本（**支持神象云账本 + 旧随手记账本**） → 进入
+1. **登录**：输入随手记账号密码 → 选择账本（**神象云账本 + 旧随手记账本**） → 进入
+   - 两类账本分别取自两个接口，互不重叠，直接拼接：
+     | 类型 | 接口 | 操作类 | provider 标签 |
+     |---|---|---|---|
+     | 神象云账本 | `yun.feidee.net/cab-index-ws/v3/book-group/cloud` | `shenxiang.py` | 神象云 |
+     | 旧随手记账本 | `tally.feidee.net/mini_program/v1/books/list` | `sui.py` | 旧版 |
+   - 任一接口失败只影响那一类账本，另一类照常可用。
+   - **密码登录被风控拦截时（code 4099「客户端参数为空」）**，点登录框下方的「用 access_token 登录」，把浏览器会话里的 token 粘进去即可绕过（详见 [1.1](#11-图形验证码旁路token-登录)）。
 2. **导入账单**
    - 上传：先选「账单类型」（农行 / 建行）→ 选文件 → 解析。**不再用文件名判断银行**。
    - Gmail：先授权 → 读取账单邮件 → 勾选 → 加载
@@ -109,6 +116,22 @@ PORT=8000
    - 待记账：点「记账」选方式、分类、备注，可顺便存为规则
    - 鼠标悬停「账本记录」列可看明细：分类、对方账户、备注、时间、流水 id、成员。转账场景额外展示「转出 → 转入」双方账户。
 4. **记账**：按 `日期 + 金额 + 收支方向` 去重，不会重复入账
+
+### 1.1 图形验证码旁路：token 登录
+
+神象云服务端会对密码登录加图形验证码风控，此时登录会失败并报：
+
+```
+神象云登录失败: 登录失败: 客户端参数为空（可在下方填入 access_token 绕过）
+```
+
+「客户端参数为空」是服务端索取 `vcid`（验证码凭据）的信号，并非真的缺参数。绕过办法是复用浏览器里那颗仍然有效的 token：
+
+1. 浏览器打开并登录 <https://www.feidee.com/cloud/>
+2. F12 → Console，执行 `copy(localStorage.Authorization)`
+3. 回到 auto-sui 登录页 → 点「密码登录失败？用 access_token 登录」→ 粘贴
+
+后端拿到 token 后直接灌进 `ShenxiangClient`，**不发起密码登录**，因此不会触发验证码。token 只存在于内存会话中，不落库。
 5. **自动记账规则**：顶部菜单「自动记账规则」进入独立管理页
    - 列出全部规则的匹配条件、分类、命中次数
    - 编辑（条件编辑器）/ 删除 / 调优先级
@@ -129,7 +152,7 @@ PORT=8000
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| POST | /api/login | 登录神象云，返回账本列表 |
+| POST | /api/login | 登录，返回账本列表。可选 `shenxiangToken` 绕过验证码风控 |
 | POST | /api/book | 切换账本，返回账户与分类 |
 | GET | /api/accounts · /api/categories | 账本账户 / 分类 |
 | GET · POST | /api/mapping | 银行卡号 → 账本账户映射 |
@@ -154,13 +177,33 @@ python test_rules_http.py       # 规则 API 入参校验（白名单拦截）
 python test_bill_readers.py     # 账单类型选择 + 白名单 + ValueError 文案
 python test_matched_detail.py   # 账本流水详情字段扩展 + Beijing tz 修正
 python test_provider_routing.py # 多 provider（神象云 vs 旧随手记）登录/切换/路由
+python test_client_routing.py   # 两个 client 不互相覆盖
+python test_book_list.py        # 两来源账本清单 + token 登录旁路 + 旧账本切换
 ```
 
 ## 七、多体系账本（神象云 + 旧随手记）
 
-同一个随手记账号可能既建了神象云账本、又保留旧版本（sui.com）的账本。本服务登录时同时尝试登录两边：
-- 神象云登录失败 → 直接 400，没有账本什么都干不了
-- 旧体系登录失败（login.sui.com 不通 / 验证码风控）→ 优雅降级，旧账本选项不出现，但不影响主流程
+### 两类账本的来源与路由
+
+| | 神象云账本 | 旧随手记账本 |
+|---|---|---|
+| 清单接口 | `yun.feidee.net/cab-index-ws/v3/book-group/cloud` | `tally.feidee.net/mini_program/v1/books/list` |
+| 操作实现 | `shenxiang.py` | `sui.py` |
+| provider | `shenxiang` | `legacy` |
+| client 存储 | `s["client"]` | `s["legacyClient"]` |
+
+⚠️ **旧账本虽然要靠神象云的 token 才能列出来，但不能用神象云 client 操作**。实测
+`setBookId(旧账本id) + initTallyInfo` 拉回来的账户 / 分类**全是空列表** —— 神象云 SDK
+只认自己的账本。所以它们一律路由 `provider=legacy` 交给 `sui.py`。
+
+`sui.py` 的账本切换走 `systemSet/book.do?opt=switch&switchId=<id>`，是服务端会话状态；
+因此切换后必须重跑 `initTallyInfo()`，否则拿回的是上一个账本的分类和账户。原先
+`switchId` 写死成单个默认账本，第二个旧账本根本进不去，现已改为参数化。
+
+### 登录时的降级
+
+- 神象云登录失败 → 直接 400，没有账本什么都干不了（可用 access_token 绕过，见 1.1）
+- 旧体系登录失败（login.sui.com 不通 / 风控 / 页面结构变化）→ 优雅降级，旧账本仍列出但不可选，不影响神象云账本
 
 切到旧账本后：
 - 账户 / 分类：从 sui.py 解析的 HTML 拉来，前端级联 `[id, name, children]` 一致形态

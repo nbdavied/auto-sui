@@ -123,8 +123,10 @@ http.interceptors.response.use(
 )
 
 export const api = {
-  login(username, password) {
-    return http.post('/login', { username, password })
+  login(username, password, shenxiangToken = '') {
+    // shenxiangToken 可选:服务端风控给密码登录塞图形码时(code 4099),
+    // 用浏览器会话里已有的 access_token 绕过,省掉验证码流程。
+    return http.post('/login', { username, password, shenxiangToken })
   },
   selectBook(sid, bookId, provider = '') {
     return http.post('/book', { sid, bookId, provider })

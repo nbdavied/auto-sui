@@ -36,10 +36,13 @@ def createReader(bankType, path, config):
     return cls(config, path) if cls else None
 
 
-def parseUpload(userId, fileBytes, filename, bankType):
+def parseUpload(userId, fileBytes, filename, bankType, provider=""):
     """解析上传的账单文件。
 
     bankType —— 用户在页面上选的账单类型,不再看文件名。
+    provider —— 当前账本所属体系(shenxiang / legacy)。账户映射按 provider
+              分开存,这样神象云 id 不会被错带到旧账本里(那是当前最严重的
+              silent-bug:已记账条目全部不显示、记账被服务端拒绝却报成功)。
     返回 {bankno, suiid, startDate, endDate, details}
     suiid 为空表示该卡号尚未配置账户映射,由前端让用户选择。
     """
@@ -48,7 +51,7 @@ def parseUpload(userId, fileBytes, filename, bankType):
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(fileBytes)
-        config = {"accounts": store.listAccounts(userId)}
+        config = {"accounts": store.listAccounts(userId, provider)}
         reader = createReader(bankType, tmpPath, config)
         if reader is None:
             supported = "、".join(r["label"] for r in FILE_READERS)

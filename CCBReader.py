@@ -8,11 +8,12 @@ class CCBReader(BankReader):
         sheet = self.__wb['Sheet0']
         banknoInfo = sheet['B2'].value
         print(banknoInfo)
-        bankno = re.findall('账号:(\d+)', banknoInfo)[0]
+        # r'' 必须有:\d 在普通字符串里是非法转义,Python 3.12 起会报 SyntaxError
+        bankno = re.findall(r'账号:(\d+)', banknoInfo)[0]
         startDateText = sheet['F2'].value
-        startDate = re.findall('起始日期:(\d+)', startDateText)[0]
+        startDate = re.findall(r'起始日期:(\d+)', startDateText)[0]
         endDateText = sheet['H2'].value
-        endDate = re.findall('结束日期:(\d+)', endDateText)[0]
+        endDate = re.findall(r'结束日期:(\d+)', endDateText)[0]
         accountInfo = self.getAccountInfo(bankno)
         rowIter = sheet.rows
         rowIndex = 0

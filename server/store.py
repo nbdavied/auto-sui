@@ -32,11 +32,12 @@ def initDb():
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS accounts (
-                id      INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                bankno  TEXT NOT NULL,
-                suiid   TEXT NOT NULL,
-                type    TEXT NOT NULL DEFAULT ''
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id  INTEGER NOT NULL,
+                bankno   TEXT NOT NULL,
+                suiid    TEXT NOT NULL,
+                type     TEXT NOT NULL DEFAULT '',
+                provider TEXT NOT NULL DEFAULT ''
             )
         """)
         conn.execute("""
@@ -61,6 +62,18 @@ def initDb():
                 conn.execute("ALTER TABLE users ADD COLUMN book_provider TEXT NOT NULL DEFAULT ''")
             except Exception:
                 pass
+        # 老库升级:accounts.provider(2026-09)。神象云 / 旧随手记是两个完全不同的
+        # 体系,同一张卡号的账户 id 在两边毫无关系 —— 把它们当一行存会直接导致
+        # 「在旧账本里拿神象云 id 去查流水」这种 silent bug。
+        # 老数据来自 conf.json 的 accounts,而 conf.json 用的是神象云 id,所以一并回填成 'shenxiang'。
+        accCols = _columns(conn, "accounts")
+        if "provider" not in accCols:
+            try:
+                conn.execute(
+                    "ALTER TABLE accounts ADD COLUMN provider TEXT NOT NULL DEFAULT ''")
+                conn.execute("UPDATE accounts SET provider = 'shenxiang' WHERE provider = ''")
+            except Exception:
+                pass
         conn.commit()
 
 
@@ -76,6 +89,8 @@ def maybeImportFromConf(userId, username):
 
     只导账户映射,不导规则: 规则里的 catid 是老随手记的分类 id,
     在神象云下无效,需要单独迁移后才能启用。
+
+    conf.json 里的映射都是神象云体系 —— 显式标记 provider='shenxiang'。
     """
     if listAccounts(userId):
         return 0
@@ -90,7 +105,7 @@ def maybeImportFromConf(userId, username):
         return 0
     accounts = conf.get("accounts") or []
     if accounts:
-        saveAccounts(userId, accounts)
+        saveAccounts(userId, accounts, provider="shenxiang")
     return len(accounts)
 
 
@@ -137,33 +152,77 @@ def getUser(userId):
 
 
 # --------------------------------------------------------------------- #
-# 账户映射 (银行账号 -> 神象云账户 id)
+# 账户映射 (银行账号 -> 账户 id,按 provider 分组)
+#
+# 神象云、旧随手记是两个完全不同的体系,同一个银行账号在两边有完全不同的账户 id。
+# 因此映射必须分 provider 存 —— 不然用户切到旧账本时,会把神象云 id 拿来查旧流水,
+# 永远空列表 —— 所有已记账条目都会显示成未记账。
 # --------------------------------------------------------------------- #
-def listAccounts(userId):
+def _providerNorm(p):
+    """未知 provider 落到神象云(历史兼容):conf.json 的映射从来都是神象云。"""
+    return p if p in ("shenxiang", "legacy") else "shenxiang"
+
+
+def listAccounts(userId, provider=None):
+    """列出该用户的所有账户映射。
+
+    provider 给定时按 provider 过滤;不传时返回全部,前端能看到完整结构。
+    """
     with getConn() as conn:
-        rows = conn.execute(
-            "SELECT id, bankno, suiid, type FROM accounts WHERE user_id = ? ORDER BY id",
-            (userId,)).fetchall()
+        sql = "SELECT id, bankno, suiid, type, provider FROM accounts WHERE user_id = ?"
+        params = [userId]
+        if provider:
+            sql += " AND provider = ?"
+            params.append(_providerNorm(provider))
+        sql += " ORDER BY provider, bankno, id"
+        rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
 
-def saveAccounts(userId, accounts):
-    """整体覆盖保存账户映射。accounts: [{bankno, suiid, type}]"""
+def saveAccounts(userId, accounts, provider=None):
+    """保存账户映射。
+
+    provider 缺省时:整张表重写,每条记录按其 provider 字段保存(没有则按
+    'shenxiang' 处理)。这样单 provider 时代的全量覆盖语义不变。
+    provider 给定时:只覆盖该 provider 下的行,另一个 provider 的映射原样保留
+    —— 用户在不同账本里分别维护映射,互不打架。
+    """
+    rows = []
+    for a in (accounts or []):
+        rows.append({"bankno": a.get("bankno", ""),
+                     "suiid": a.get("suiid", ""),
+                     "type": a.get("type", ""),
+                     "provider": _providerNorm(a.get("provider") or provider or "")})
     with getConn() as conn:
-        conn.execute("DELETE FROM accounts WHERE user_id = ?", (userId,))
-        for a in accounts:
+        if provider:
+            # 仅覆盖指定 provider,保留另一份
             conn.execute(
-                "INSERT INTO accounts (user_id, bankno, suiid, type) VALUES (?, ?, ?, ?)",
-                (userId, a.get("bankno", ""), a.get("suiid", ""), a.get("type", "")))
+                "DELETE FROM accounts WHERE user_id = ? AND provider = ?",
+                (userId, _providerNorm(provider)))
+        else:
+            conn.execute("DELETE FROM accounts WHERE user_id = ?", (userId,))
+        for r in rows:
+            conn.execute(
+                "INSERT INTO accounts (user_id, bankno, suiid, type, provider) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (userId, r["bankno"], r["suiid"], r["type"], r["provider"]))
         conn.commit()
     return listAccounts(userId)
 
 
-def findAccount(userId, bankno):
+def findAccount(userId, bankno, provider=None):
+    """按卡号找映射。provider 缺省时按 (userId, bankno) 取一条;有 provider
+    则只在该 provider 范围内找 —— 这是修 silent-bug 的关键。
+    """
     with getConn() as conn:
-        row = conn.execute(
-            "SELECT * FROM accounts WHERE user_id = ? AND bankno = ?",
-            (userId, bankno)).fetchone()
+        if provider:
+            row = conn.execute(
+                "SELECT * FROM accounts WHERE user_id = ? AND bankno = ? AND provider = ?",
+                (userId, bankno, _providerNorm(provider))).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM accounts WHERE user_id = ? AND bankno = ? "
+                "LIMIT 1", (userId, bankno)).fetchone()
         return dict(row) if row else None
 
 
@@ -238,9 +297,13 @@ def recordRuleHit(userId, ruleId):
 
 
 def importFromConf(userId, conf):
-    """从 conf.json 导入账户映射(老规则的 catid 在神象云下无效,不导入)。"""
+    """从 conf.json 导入账户映射(老规则的 catid 在神象云下无效,不导入)。
+
+    历史调用方未传 provider —— 显式打 'shenxiang' 标签,避免和未来的
+    'legacy' 映射混在一起。
+    """
     if conf.get("accounts"):
-        saveAccounts(userId, conf["accounts"])
+        saveAccounts(userId, conf["accounts"], provider="shenxiang")
     return {"accounts": len(conf.get("accounts", [])), "rules": 0}
 
 

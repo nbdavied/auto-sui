@@ -43,9 +43,23 @@ class Sui():
         self.__authRedirect('get', 'https://login.sui.com/auth.do', {}, 1, "https://login.sui.com")
         print("登陆成功")
     
-    def initTallyInfo(self):
+    # 默认账本。之前这里写死导致第二个旧账本永远进不去;
+    # 现在 switchId 由 initTallyInfo 的 bookId 参数决定,留这个是兼容既有调用。
+    DEFAULT_BOOK_ID = "1505498391"
+
+    def initTallyInfo(self, bookId=None):
+        """切换账本并拉取该账本的收支类型 / 账户。
+
+        bookId 留空时用 DEFAULT_BOOK_ID。账本切换靠 book.do?opt=switch,
+        服务器上「当前账本」是会话状态,切换到别的账本必须重新拉一次 /tally/new.do,
+        否则拿到的还是上一个账本的分类和账户。
+        """
         print("选择账本")
-        self.__session.get("https://www.sui.com/systemSet/book.do?opt=switch&switchId=1505498391&return=https://www.sui.com/tally/new.do", headers=HEADERS)
+        target = bookId or self.DEFAULT_BOOK_ID
+        self.__session.get(
+            "https://www.sui.com/systemSet/book.do?opt=switch&switchId=%s"
+            "&return=https://www.sui.com/tally/new.do" % target,
+            headers=HEADERS)
         print("初始化收支类型及账户信息")
         result = self.__session.get("https://www.sui.com/tally/new.do", headers=HEADERS)
         soup = BeautifulSoup(result.text, features="html.parser")
@@ -114,6 +128,7 @@ class Sui():
         result = self.__session.post(
             'https://www.sui.com/tally/payout.rmi', params=params, headers=HEADERS)
         print("支出记账结果", result.text)
+        return result
 
     def income(self, account, price, category, id=0, store=0, payTime=None, project=0, member=0, memo='',
                url='', out_account=0, in_account=0, debt_account='', price2=''):
@@ -138,6 +153,7 @@ class Sui():
         result = self.__session.post(
             'https://www.sui.com/tally/income.rmi', params=params, headers=HEADERS)
         print('收入记账结果', result.text)
+        return result
 
     def transfer(self, out_account, in_account, price, id=0, store=0, payTime=None, project=0, member=0, memo='',
                  url='', debt_account='', account=0, price2=''):
@@ -161,6 +177,7 @@ class Sui():
         result = self.__session.post(
             'https://www.sui.com/tally/transfer.rmi', params=params, headers=HEADERS)
         print('转账记账结果', result.text)
+        return result
 
     def accountDetail(self, accountId, beginDate, endDate):
         params = {
