@@ -24,11 +24,19 @@ onMounted(async () => {
   const sid = params.get('sid')
   if (sid) saveLocal({ sid })
   const result = params.get('gmail')
+  const reason = params.get('reason') || ''
   window.history.replaceState({}, '', window.location.pathname)
 
   if (result !== 'ok') {
-    if (result === 'expired') ElMessage.warning('会话已过期，请重新登录后再授权')
-    else ElMessage.error('Gmail 授权失败')
+    if (result === 'expired') {
+      // 会话在授权期间失效(服务重启 / 超过 8 小时)。flow 里的 PKCE verifier
+      // 跟着一起丢了,原样重试没用,必须重新走一次授权;说清楚原因比笼统报错有用。
+      ElMessage.warning('授权会话已失效（服务重启或超时），请重新点击「授权」')
+    } else if (reason === 'access_denied') {
+      ElMessage.warning('你取消了 Google 授权')
+    } else {
+      ElMessage.error('Gmail 授权失败' + (reason ? '：' + reason : '，请重试'))
+    }
     return
   }
 

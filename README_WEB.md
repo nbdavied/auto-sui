@@ -4,16 +4,100 @@
 
 ## 一、启动
 
-### 1. 后端
+### 0. 最省事的方式（Windows，推荐）
 
-```bash
-pip install -r requirements.txt
-python run_server.py            # http://127.0.0.1:8000
+项目根目录放了两个批处理，双击即可：
+
+| 文件 | 作用 |
+|---|---|
+| `start.bat` | 启动服务（约 3 秒后自动打开浏览器） |
+| `stop.bat` | 停止服务（按端口找到监听进程并结束） |
+
+想改端口 / 代理 / 是否热重载，用记事本打开 `start.bat`，改顶部这几行即可：
+
+```bat
+set "PORT=8000"
+set "PROXY=socks5://127.0.0.1:10808"
+set "RELOAD=0"
+set "PY=C:\Users\nbdav\.workbuddy\binaries\python\envs\default\Scripts\python.exe"
 ```
 
-### 2. 前端
+⚠️ **`RELOAD=1`（改代码自动重启）时不要做 Gmail 授权** —— 重启会打断 OAuth 回调，
+导致 `?gmail=expired`。做授权请用 `RELOAD=0`。
 
-开发模式（改代码热更新）：
+### 1. 手动命令行启动（本机现有环境）
+
+本项目当前使用工具链自带的 Python 3.13 环境，依赖已装好，**无需再 pip install**：
+
+```bash
+cd C:/Users/nbdav/projects/auto-sui
+
+PYTHONIOENCODING=utf-8 \
+HTTPS_PROXY=socks5://127.0.0.1:10808 \
+HTTP_PROXY=socks5://127.0.0.1:10808 \
+RELOAD=0 PORT=8000 \
+"C:/Users/nbdav/.workbuddy/binaries/python/envs/default/Scripts/python.exe" run_server.py
+```
+
+启动后访问 <http://127.0.0.1:8000>，`Ctrl+C` 停止。
+
+**环境变量说明**
+
+| 变量 | 作用 | 不设会怎样 |
+|---|---|---|
+| `HTTPS_PROXY` / `HTTP_PROXY` | Google token 端点走代理 | Gmail 授权跳回 `?gmail=error`（境内连不上） |
+| `RELOAD` | `1` = 改代码自动重启 | 默认 `1`；做 Gmail 授权时务必设 `0` |
+| `PORT` | 监听端口 | 默认 `8000` |
+| `AUTOSUI_SESSION_FILE` | 会话落盘路径 | `run_server.py` 默认设为 `sessions.db`；置空 = 纯内存 |
+| `AUTOSUI_SESSION_TTL` | 会话有效期（秒） | 默认 8 小时 |
+| `FRONTEND_URL` | 前端地址（开发模式） | 默认跳回当前域名 |
+
+> 代理端口按你实际的来：Clash 常见 SOCKS5 `10808` / HTTP `10809`。
+> 只用记账、不用 Gmail 的话，可以去掉两行 `PROXY`。
+
+### 2. 停止服务
+
+```bash
+# 方式一：如果服务窗口还开着，直接在那个窗口按 Ctrl+C
+
+# 方式二：按端口找进程结束（关掉了窗口 / 不确定 PID 时）
+taskkill /F /PID <PID>          # PID 从下面这条命令拿
+netstat -ano | findstr ":8000" | findstr "LISTENING"
+```
+
+> 注意用 `findstr "LISTENING"` 过滤。不加过滤时，已建立的连接对端也会显示 `:8000`
+> （状态 `TIME_WAIT`、PID 为 `0`），照着那个 PID 杀是无效的。
+
+### 3. 从零安装（换新机器时）
+
+```bash
+cd C:/Users/nbdav/projects/auto-sui
+
+# 建虚拟环境（需 Python 3.11+，推荐 3.12/3.13）
+python -m venv .venv
+
+# 装后端依赖
+.venv/Scripts/python.exe -m pip install --upgrade pip
+.venv/Scripts/python.exe -m pip install -r requirements.txt
+
+# 构建前端（需 Node 18+）
+cd web
+npm install
+npm run build
+cd ..
+
+# 启动
+.venv/Scripts/python.exe run_server.py
+```
+
+> ⚠️ 项目里已有的 `.venv` 是 Python **3.14**，缺 `fastapi` / `uvicorn`
+> （仓库 `requirements.txt` 里的 Web 依赖当初没装进去）。**不要直接用它启动**，
+> 否则报 `No module named 'fastapi'`。要么按上面第 3 节重建，要么补装：
+> `.venv/Scripts/python.exe -m pip install -r requirements.txt`
+
+### 4. 前端开发模式（改前端代码时）
+
+生产模式下前端由后端托管，改完要 `npm run build` 才生效。开发时用 dev server 免构建：
 
 ```bash
 cd web
@@ -21,29 +105,44 @@ npm install
 npm run dev                     # http://localhost:5173
 ```
 
-生产模式（构建后由后端直接托管，只需跑后端）：
-
-```bash
-cd web && npm run build         # 产出 web/dist
-python run_server.py            # 直接访问 http://127.0.0.1:8000
-```
+此时后端仍需单独跑，并用 `FRONTEND_URL=http://localhost:5173` 启动，
+这样 Gmail 授权回调才会跳回 5173 而不是 8000。
 
 ## 二、凭据怎么存的
 
 | 凭据 | 存放位置 | 说明 |
 |---|---|---|
 | 随手记账号密码 | 浏览器本地 | 服务端不存密码，只在内存中换 token |
-| 神象云 token | 服务端内存 | 会话级，进程重启即失效 |
+| 神象云 token | 服务端会话（落盘 sessions.db） | 进程重启后仍可恢复 |
 | Gmail OAuth token | 浏览器本地 | 一次授权长期有效；服务端只在授权瞬间中转 |
+| Gmail 授权中的 PKCE verifier | 服务端会话（落盘 sessions.db） | 临时，用完即删；见下节 |
 | 账户映射 / 记账规则 | SQLite（autosui.db） | 只有配置，没有密码 |
 
 **因为要传密码，正式部署必须上 HTTPS**，否则密码在链路上是明文。用 Nginx 反代 + Let's Encrypt 证书即可。
+
+### 会话落盘（sessions.db）
+
+会话默认落盘到项目根目录的 `sessions.db`（`sessions.db` 已在 `.gitignore` 里）。这是为了解决一个具体问题：**Gmail 授权过程中服务若重启，授权就白做了**。
+
+原因在于 OAuth 是「重定向出去再回来」的流程：点授权时后端把 PKCE 的 `code_verifier` 存在会话里 → 跳到 Google → 用户在 Google 页面登录、同意（可能几十秒到几分钟）→ 带回 `code` 回调。如果这段时间服务重启（比如开着 `RELOAD=1` 改了代码），内存里的会话连同 verifier 一起消失，回调只能报「授权会话已失效」，用户反复重试也没用。
+
+现在会把会话落盘，并且单独存一份可序列化的 `code_verifier`，进程重启后能重建 flow，让这次授权照常完成。
+
+想改回纯内存模式（凭据完全不落盘）：
+
+```bash
+AUTOSUI_SESSION_FILE= python run_server.py
+```
+
+也可以改会话有效期（默认 8 小时）：`AUTOSUI_SESSION_TTL=3600`。
 
 ### Gmail 凭据的生命周期
 
 授权完成后，前端调 `/api/gmail/claim` 把凭据领回存到浏览器本地，服务端随即删除自己的副本。之后每次读邮件，前端把凭据随请求带上；access_token 过期时服务端自动用 refresh_token 续期，并把续期后的凭据回传、前端覆盖保存。
 
 所以只要 refresh_token 有效（通常长期有效，除非用户主动撤销），**退出登录、关闭浏览器、重启服务都不需要重新授权**。
+
+> 注意：退出登录（`clearLocal`）**刻意保留** `autosui.gmailCreds`，只有点「删除授权」才会清。改这块代码时别把这条规则弄丢。
 
 想撤销就在 Gmail 标签页点「删除授权」，会清除本机保存的凭据（不影响 Google 账号侧的授权记录，要彻底撤销需到 Google 账号设置的「第三方应用访问权限」里移除）。
 

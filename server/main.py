@@ -693,12 +693,14 @@ class GmailClaimBody(BaseModel):
 def gmailClaim(body: GmailClaimBody):
     """授权完成后,前端来把凭据领走存到浏览器。
 
-    领取即从会话移除(一次性),服务端不留副本 —— 凭据的最终归宿是浏览器。
+    从会话移除(一次性),服务端不再留副本 —— 凭据的最终归宿是浏览器。
+    同时刷一次落盘,避免「领走了但还没落盘」时进程重启导致凭据丢失。
     """
     s = getSession(body.sid)
     creds = s.pop("gmailCreds", None) if s else None
     if creds is None:
         raise HTTPException(status_code=404, detail="没有待领取的授权凭据")
+    sessions.setField(body.sid, "gmailCredsClaimed", True)
     from server import gmail_service
     return ok(creds=gmail_service.credsToJson(creds))
 
@@ -723,6 +725,10 @@ def gmailAuthUrl(sid: str):
         s["gmailFlow"] = flow
         # state 带 sid,回调时用它找回同一个会话
         url = gmail_service.getAuthUrl(flow, state=sid)
+        # 注意顺序: PKCE 的 code_verifier 是在 authorization_url() 里才生成的,
+        # 必须等 URL 出来之后再抽存,否则存进去的是 None ——
+        # 那样重启后无法重建 flow,回调照样报「授权会话已失效」。
+        sessions.setField(sid, "gmailFlowState", gmail_service.flowToState(flow))
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return ok(url=url)
@@ -735,27 +741,37 @@ def gmailCallback(request: Request, code: str = "", state: str = "",
 
     生产模式下前端由本服务托管,默认跳回当前访问域名;开发模式(前端 dev server
     在 5173)则用 FRONTEND_URL 环境变量指定跳转地址。
+
+    会话恢复: 用户可能要在 Google 页面上停留很久,期间服务若重启,内存里的
+    flow 对象就没了。此时用落盘的 gmailFlowState(PKCE code_verifier)重建 flow,
+    让这一次授权仍然能完成 —— 否则用户只能反复重试,表现得就像「授权坏了」。
     """
     frontend = os.environ.get("FRONTEND_URL", "")
     if not frontend:
         frontend = str(request.base_url).rstrip("/")
-    if error or not code:
-        return RedirectResponse("%s/?gmail=error" % frontend)
+    if error:
+        return RedirectResponse("%s/?gmail=error&reason=%s" % (frontend, error))
+    if not code:
+        return RedirectResponse("%s/?gmail=error&reason=missing_code" % frontend)
     s = sessions.get(state)
     if s is None:
-        # 会话已过期(授权耗时太久),让用户重新登录
-        return RedirectResponse("%s/?gmail=expired" % frontend)
-    flow = s.get("gmailFlow")
-    if flow is None:
+        # 会话彻底没了(超过 8 小时 TTL / 落盘文件被删),只能重新授权
         return RedirectResponse("%s/?gmail=expired" % frontend)
     from server import gmail_service
+    flow = s.get("gmailFlow")
+    if flow is None:
+        # 进程重启过: 用落盘的 verifier 重建 flow
+        flow = gmail_service.flowFromState(s.get("gmailFlowState"))
+    if flow is None:
+        return RedirectResponse("%s/?gmail=expired" % frontend)
     try:
         creds = gmail_service.exchangeCode(flow, code)
     except Exception:
         traceback.print_exc()
         return RedirectResponse("%s/?gmail=error" % frontend)
-    s["gmailCreds"] = creds
     s.pop("gmailFlow", None)
+    s.pop("gmailFlowState", None)
+    sessions.setField(state, "gmailCreds", creds)
     return RedirectResponse("%s/?gmail=ok&sid=%s" % (frontend, state))
 
 

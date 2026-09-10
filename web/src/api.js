@@ -82,9 +82,12 @@ export function saveLocal(patch = {}) {
 }
 
 export function clearLocal() {
-  Object.values(KEY).forEach(k => {
-    // Gmail 凭据跨登录保留,避免退出后又要重新授权
-    if (k === KEY.gmailCreds) return
+  Object.entries(KEY).forEach(([name, k]) => {
+    // Gmail 凭据跨登录保留,避免退出后又要重新授权。
+    // 注意比较的是「KEY 的名字」而不是「KEY 的值」—— 之前写成 k === KEY.gmailCreds,
+    // 拿 localStorage 的 key 字符串去比 'autosui.gmailCreds' 永远不等,
+    // 于是退出登录时 Gmail 凭据也被清掉了(表现为「之前正常,现在又要重新授权」)。
+    if (name === 'gmailCreds') return
     localStorage.removeItem(k)
   })
   localStorage.removeItem(VIEW_KEY)

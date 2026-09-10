@@ -155,3 +155,5 @@ dmypy.json
 .pyre/
 
 test.py
+# 会话落盘文件(Gmail OAuth flow / 凭据,含敏感信息)
+sessions.db

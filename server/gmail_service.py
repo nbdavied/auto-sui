@@ -99,6 +99,37 @@ def getAuthUrl(flow, state=None):
     return url
 
 
+def flowToState(flow):
+    """把 flow 里换 token 必需的 PKCE 信息抽成可落盘的 dict。
+
+    flow 对象本身无法序列化(内含 requests session 等),但换 token 真正依赖的
+    只有 code_verifier —— 把它和 redirect_uri 存起来,进程重启后就能重建 flow,
+    而不是让用户在 Google 页面白跑一趟(回调只能报「授权会话已失效」)。
+    """
+    return {
+        "codeVerifier": getattr(flow, "code_verifier", None) or "",
+        "redirectUri": flow.redirect_uri or REDIRECT_URI,
+    }
+
+
+def flowFromState(state):
+    """从 flowToState 的产物重建 flow;失败返回 None。
+
+    没有 code_verifier 时不能重建 —— PKCE 流程下换 token 必被 Google 拒绝,
+    与其让用户以为能成,不如明确返回 None 走「重新授权」的引导。
+    """
+    verifier = (state or {}).get("codeVerifier")
+    if not verifier:
+        return None
+    try:
+        flow = buildFlow()
+        flow.redirect_uri = (state.get("redirectUri") or REDIRECT_URI)
+        flow.code_verifier = verifier
+        return flow
+    except Exception:
+        return None
+
+
 def exchangeCode(flow, code):
     """用同一个 flow 实例和回调里的 code 换凭据。
 
