@@ -12,6 +12,9 @@ const KEY = {
   gmailCreds: 'autosui.gmailCreds'
 }
 
+// 持久化当前视图(对账 / 规则),刷新页面后还能停在原处
+const VIEW_KEY = 'autosui.view'
+
 // Gmail OAuth 凭据存在浏览器本地,目的就是「一次授权长期有效」。
 // 因此退出登录/切换账本都不清除它,只有用户点「删除授权」才清。
 //
@@ -43,6 +46,15 @@ export function isSelecting() {
   return localStorage.getItem(KEY.selecting) === '1'
 }
 
+export function setView(v) {
+  if (v) localStorage.setItem(VIEW_KEY, v)
+  else localStorage.removeItem(VIEW_KEY)
+  state.view = v
+}
+export function getView() {
+  return localStorage.getItem(VIEW_KEY) || ''
+}
+
 export const state = reactive({
   sid: localStorage.getItem(KEY.sid) || '',
   username: localStorage.getItem(KEY.username) || '',
@@ -56,7 +68,8 @@ export const state = reactive({
   bankno: '',
   suiid: '',
   source: '',
-  gmailCreds: localStorage.getItem(KEY.gmailCreds) || ''
+  gmailCreds: localStorage.getItem(KEY.gmailCreds) || '',
+  view: localStorage.getItem(VIEW_KEY) || ''
 })
 
 export function saveLocal(patch = {}) {
@@ -74,11 +87,13 @@ export function clearLocal() {
     if (k === KEY.gmailCreds) return
     localStorage.removeItem(k)
   })
+  localStorage.removeItem(VIEW_KEY)
   state.sid = ''
   state.bookId = ''
   state.bookName = ''
   state.books = []
   state.bills = []
+  state.view = ''
 }
 
 // 切换账本: 只清账本相关的本地状态,保留登录凭据,免去重新输密码
@@ -91,6 +106,8 @@ export function leaveBook() {
   state.suiid = ''
   state.accounts = []
   state.categories = { income: [], payout: [] }
+  // 离开账本时也回到对账页,顺便清掉规则页标记
+  state.view = ''
 }
 
 const http = axios.create({ baseURL: '/api', timeout: 60000 })
@@ -109,8 +126,8 @@ export const api = {
   login(username, password) {
     return http.post('/login', { username, password })
   },
-  selectBook(sid, bookId) {
-    return http.post('/book', { sid, bookId })
+  selectBook(sid, bookId, provider = '') {
+    return http.post('/book', { sid, bookId, provider })
   },
   accounts(sid) {
     return http.get('/accounts', { params: { sid } })
@@ -118,11 +135,16 @@ export const api = {
   categories(sid) {
     return http.get('/categories', { params: { sid } })
   },
-  upload(sid, file) {
+  upload(sid, file, bankType) {
     const form = new FormData()
     form.append('sid', sid)
+    form.append('bankType', bankType)
     form.append('file', file)
     return http.post('/bills/upload', form)
+  },
+  // 后端白名单: 上传路径支持的账单类型(abc/ccb/...)。前端下拉数据源。
+  listBillReaders() {
+    return http.get('/bills/readers')
   },
   reconcile(sid, suiid) {
     return http.post('/reconcile', { sid, suiid })
@@ -145,6 +167,40 @@ export const api = {
   },
   gmailLoad(sid, messageIds, suiid, creds) {
     return http.post('/gmail/load', { sid, messageIds, suiid, creds })
+  },
+
+  // ----- 规则 -----
+  // 前端使用的字段与匹配方式白名单，与后端 MATCH_FIELDS / MATCH_KINDS 一致。
+  // 前端不存多份常量,直接放在这里方便编辑弹窗引用。
+  ruleFields: [
+    { value: 'opAccName', label: '对手户名' },
+    { value: 'opAccNo',   label: '对手账号' },
+    { value: 'memo',      label: '备注' },
+    { value: 'usage',     label: '用途' },
+    { value: 'amount',    label: '金额' },
+    { value: 'transType', label: '收支方向' }
+  ],
+  ruleMatches: [
+    { value: 'eq',         label: '等于' },
+    { value: 'contains',   label: '包含' },
+    { value: 'startswith', label: '开头是' },
+    { value: 'regex',      label: '正则' },
+    { value: 'gt',         label: '大于' },
+    { value: 'lt',         label: '小于' }
+  ],
+  rules: {
+    list(sid) {
+      return http.get('/rules', { params: { sid } })
+    },
+    add(rule) {
+      return http.post('/rules', rule)
+    },
+    update(id, patch) {
+      return http.put(`/rules/${id}`, patch)
+    },
+    remove(sid, id) {
+      return http.delete(`/rules/${id}`, { params: { sid } })
+    }
   }
 }
 

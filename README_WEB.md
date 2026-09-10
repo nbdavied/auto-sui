@@ -99,15 +99,31 @@ PORT=8000
 
 ## 四、页面流程
 
-1. **登录**：输入随手记账号密码 → 选择账本 → 进入
+1. **登录**：输入随手记账号密码 → 选择账本（**支持神象云账本 + 旧随手记账本**） → 进入
 2. **导入账单**
-   - 上传：选农行 `abc*.xlsx` / 建行 `hqmx*.xlsx`
+   - 上传：先选「账单类型」（农行 / 建行）→ 选文件 → 解析。**不再用文件名判断银行**。
    - Gmail：先授权 → 读取账单邮件 → 勾选 → 加载
 3. **对账**：选记账账户后自动比对账本流水
    - 已入账：显示账本里的对应记录
    - 规则可自动：一键按规则记账
    - 待记账：点「记账」选方式、分类、备注，可顺便存为规则
+   - 鼠标悬停「账本记录」列可看明细：分类、对方账户、备注、时间、流水 id、成员。转账场景额外展示「转出 → 转入」双方账户。
 4. **记账**：按 `日期 + 金额 + 收支方向` 去重，不会重复入账
+5. **自动记账规则**：顶部菜单「自动记账规则」进入独立管理页
+   - 列出全部规则的匹配条件、分类、命中次数
+   - 编辑（条件编辑器）/ 删除 / 调优先级
+   - 新增规则（手动指定条件）
+
+## 五、规则引擎
+
+老版本用 Python `eval` 执行 `transType == 'payout' and ...` 这类表达式，**多用户场景下任何登录用户都能借规则执行任意代码**（读文件、枚举数据库）。新版本改成结构化条件：
+- 字段白名单：`opAccName / opAccNo / memo / usage / amount / transType`
+- 匹配方式白名单：`eq / contains / startswith / regex / gt / lt`
+- 多条条件之间是 AND，按 priority 降序匹配第一条命中
+- 前端编辑器由下拉框 + 输入框组成，杜绝手写任意代码
+- 历史数据已通过 `expToConditions` 自动迁移到新格式（在 `initDb()` 时自动跑）
+
+后端校验代码在 `server/main.py:validateConditions`，前端字段常量在 `web/src/api.js:api.ruleFields` / `api.ruleMatches`。
 
 ## 五、接口一览
 
@@ -117,10 +133,11 @@ PORT=8000
 | POST | /api/book | 切换账本，返回账户与分类 |
 | GET | /api/accounts · /api/categories | 账本账户 / 分类 |
 | GET · POST | /api/mapping | 银行卡号 → 账本账户映射 |
-| POST | /api/bills/upload | 上传并解析账单 |
+| POST | /api/bills/readers | 列出前端支持的账单类型（农行/建行 等） |
+| POST | /api/bills/upload | 上传并解析账单（form 字段：`sid`、`bankType`、`file`） |
 | POST | /api/reconcile | 对账，返回每条状态 |
 | POST | /api/tally | 记账 |
-| GET · POST · DELETE | /api/rules | 自动记账规则 |
+| GET · POST · PUT · DELETE | /api/rules | 自动记账规则（结构化条件） |
 | GET | /api/gmail/auth-url | 生成 Gmail 授权地址 |
 | POST | /api/gmail/claim | 授权后把凭据领回浏览器（一次性） |
 | POST | /api/gmail/mails | 账单邮件列表（body 带凭据） |
@@ -132,4 +149,22 @@ PORT=8000
 python run_server.py            # 另开终端
 python test_api.py              # 登录→选账本→上传→对账 冒烟测试
 python test_api.py --tally      # 额外记一笔（会写入当前账本）
+python test_rules.py            # 规则 CRUD + 匹配引擎测试
+python test_rules_http.py       # 规则 API 入参校验（白名单拦截）
+python test_bill_readers.py     # 账单类型选择 + 白名单 + ValueError 文案
+python test_matched_detail.py   # 账本流水详情字段扩展 + Beijing tz 修正
+python test_provider_routing.py # 多 provider（神象云 vs 旧随手记）登录/切换/路由
 ```
+
+## 七、多体系账本（神象云 + 旧随手记）
+
+同一个随手记账号可能既建了神象云账本、又保留旧版本（sui.com）的账本。本服务登录时同时尝试登录两边：
+- 神象云登录失败 → 直接 400，没有账本什么都干不了
+- 旧体系登录失败（login.sui.com 不通 / 验证码风控）→ 优雅降级，旧账本选项不出现，但不影响主流程
+
+切到旧账本后：
+- 账户 / 分类：从 sui.py 解析的 HTML 拉来，前端级联 `[id, name, children]` 一致形态
+- 记账（payout / income / transfer）：路由到 `sui.py` 的同名方法，参数顺序与神象云一致
+- 对账：legacy detail 走 `_normalizeLegacyDetails` 模糊归一化，让 reconcile 引擎拿到 `sdate / itemAmount / tranType / *AcountId`；缺字段兜 0，绝不抛 5xx
+
+后端按 `provider` 路由，前端不感知 —— 选中账本后 `state.bookId` 后端已经自动绑好 client。

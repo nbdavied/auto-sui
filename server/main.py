@@ -19,7 +19,12 @@ from fastapi.staticfiles import StaticFiles                        # noqa: E402
 from pydantic import BaseModel                                     # noqa: E402
 from typing import Optional, List                                  # noqa: E402
 
-from server import store, session_store as sessions, sui_service, readers, reconcile  # noqa: E402
+from server import store, session_store as sessions, sui_service, legacy_sui_service  # noqa: E402
+from server import readers, reconcile  # noqa: E402
+
+# 提供方常量。前端按这个字段决定到底调哪个后端记账。
+PROVIDER_SHENXIANG = "shenxiang"
+PROVIDER_LEGACY = "legacy"
 
 app = FastAPI(title="auto-sui 对账服务", version="1.0.0")
 app.add_middleware(
@@ -46,11 +51,39 @@ def getSession(sid: str):
 
 
 def getClient(sid: str):
+    """按当前会话激活的 provider 返回对应 client。
+
+    神象云 client 始终存在 s["client"],旧体系 client 始终存在
+    s["legacyClient"] —— 两个字段互不覆盖,避免「切到旧账本后
+    再把 s["client"] 顶成 Sui 实例,导致切回神象云时拿错对象」。
+    """
     s = getSession(sid)
-    client = s.get("client")
+    provider = s.get("provider", PROVIDER_SHENXIANG)
+    if provider == PROVIDER_LEGACY:
+        client = s.get("legacyClient")
+    else:
+        client = s.get("client")
     if client is None:
-        raise HTTPException(status_code=401, detail="未登录神象云,请重新登录")
+        raise HTTPException(status_code=401, detail="未登录,请重新登录")
     return client
+
+
+def getProvider(sid: str):
+    """当前会话激活账本的 provider,记账 / 对账 / 列表查询都按它路由。"""
+    return getSession(sid).get("provider", PROVIDER_SHENXIANG)
+
+
+def activeService(provider: str):
+    """按 provider 返回 service 模块: shenxiang → sui_service, legacy → legacy_sui_service。
+
+    两个模块的方法形态对齐(createClient / listBooks / selectBook /
+    buildAccountOptions / buildCategoryOptions / payout / income /
+    transfer)。main.py 通过这一函数把 provider 与 service 解耦,
+    不需要在每个 endpoint 里 if/else。
+    """
+    if provider == PROVIDER_LEGACY:
+        return legacy_sui_service
+    return sui_service
 
 
 def ok(**kwargs):
@@ -67,10 +100,16 @@ class LoginBody(BaseModel):
 
 @app.post("/api/login")
 def login(body: LoginBody):
-    """用随手记账号密码登录,返回账本列表。密码不会写入任何持久化存储。"""
+    """用随手记账号密码登录,返回账本列表(神象云 + 旧随手记)。
+
+    同一账号可能同时拥有神象云账本和旧体系账本。设计上:
+      - 神象云是「新体系」,默认主账本;登录失败 -> 直接 400,因为新体系挂了什么都做不了
+      - 旧体系是「兼容旧账本」,登录失败也不阻塞 —— 该账本从清单里抹掉即可
+        (login.sui.com 服务偶尔不可用,但用户大多数操作不需要它)
+    """
     try:
         client = sui_service.createClient(body.username, body.password)
-        books = client.getBooks()
+        shenxiangBooks = client.getBooks()
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=400, detail="神象云登录失败: %s" % e)
@@ -81,51 +120,106 @@ def login(body: LoginBody):
     s["username"] = body.username
     s["password"] = body.password      # 仅内存,用于 token 过期后自动重登
     s["userId"] = user["id"]
-    s["client"] = client
+    s["client"] = client              # 神象云 client(始终保留)
+    s["provider"] = PROVIDER_SHENXIANG
+
+    # ---- 旧随手记可选项:登录失败也不影响主流程 ----
+    legacyBooks = []
+    s["legacyClient"] = None
+    try:
+        legacyCli = legacy_sui_service.createClient(body.username, body.password)
+        s["legacyClient"] = legacyCli
+        legacyBooks = legacy_sui_service.listBooks()
+    except Exception as e:
+        # login.sui.com 不可用 / 验证码风控 / 账号已迁移 —— 都属于「跳过」
+        print(f"[legacy] 旧体系登录失败,跳过旧账本选项: {e}")
+
+    # 给神象云账本打 provider 标签
+    for b in shenxiangBooks:
+        b.setdefault("provider", PROVIDER_SHENXIANG)
+    books = shenxiangBooks + legacyBooks
 
     savedBook = user.get("book_id") or ""
-    # 已保存过账本则直接进入
-    if savedBook and any(b["id"] == savedBook for b in books):
+    savedProvider = user.get("book_provider", "") or PROVIDER_SHENXIANG
+    # 已保存的账本 + 来源 同时匹配 —— 否则 provider 旧数据可能错配
+    target = None
+    for b in books:
+        if b["id"] == savedBook and b.get("provider", PROVIDER_SHENXIANG) == savedProvider:
+            target = b
+            break
+    if target is not None:
+        cli = s["legacyClient"] if target["provider"] == PROVIDER_LEGACY else s["client"]
         try:
-            sui_service.selectBook(client, savedBook)
+            activeService(target["provider"]).selectBook(cli, savedBook)
             s["bookId"] = savedBook
+            s["provider"] = target["provider"]
         except Exception:
             pass
-    return ok(sid=sid, books=books, bookId=s.get("bookId", ""))
+    return ok(sid=sid, books=books, bookId=s.get("bookId", ""),
+              provider=s.get("provider", PROVIDER_SHENXIANG))
 
 
 class BookBody(BaseModel):
     sid: str
     bookId: str
+    provider: Optional[str] = None  # 缺省时按已激活的 provider 路由
 
 
 @app.post("/api/book")
 def selectBook(body: BookBody):
+    """切换账本。
+
+    provider 缺省时按现有会话的 provider 走(单 provider 迁移期兼容)。
+    同时支持切换「神象云账本 A → 神象云账本 B」(不变 provider,
+    只换 bookId);以及「神象云 → 旧随手记」(换 client)。
+    """
     s = getSession(body.sid)
-    client = s.get("client")
-    if client is None:
+    targetProvider = body.provider or s.get("provider", PROVIDER_SHENXIANG)
+    if targetProvider not in (PROVIDER_SHENXIANG, PROVIDER_LEGACY):
+        raise HTTPException(status_code=400, detail="不支持的账本来源: %s" % targetProvider)
+    service = activeService(targetProvider)
+    # 选定 provider 后,client 必须对得上
+    if targetProvider == PROVIDER_LEGACY:
+        cli = s.get("legacyClient")
+        if cli is None:
+            raise HTTPException(status_code=400,
+                                detail="旧体系不可用: 登录时旧账本选项不可选")
+    else:
+        cli = s.get("client")
+    if cli is None:
         raise HTTPException(status_code=401, detail="未登录")
+
     try:
-        info = sui_service.selectBook(client, body.bookId)
+        service.selectBook(cli, body.bookId)
     except Exception as e:
         raise HTTPException(status_code=400, detail="切换账本失败: %s" % e)
     s["bookId"] = body.bookId
-    store.setBookId(s["userId"], body.bookId)
-    return ok(accounts=sui_service.buildAccountOptions(client),
-              categories=sui_service.buildCategoryOptions(client),
-              bookId=body.bookId)
+    s["provider"] = targetProvider
+    # 不再覆盖 s["client"]:神象云 client 始终在 s["client"]、
+    # legacy client 始终在 s["legacyClient"],getClient() 按 provider 路由。
+    # 否则「旧账本 → 神象云」切换时会把 s["client"] 顶成 Sui 实例。
+    store.setBookId(s["userId"], body.bookId, targetProvider)
+    return ok(accounts=service.buildAccountOptions(cli),
+              categories=service.buildCategoryOptions(cli),
+              bookId=body.bookId, provider=targetProvider)
 
 
 @app.get("/api/accounts")
 def listAccounts(sid: str):
-    client = getClient(sid)
-    return ok(accounts=sui_service.buildAccountOptions(client))
+    s = getSession(sid)
+    provider = s.get("provider", PROVIDER_SHENXIANG)
+    cli = getClient(sid)
+    return ok(accounts=activeService(provider).buildAccountOptions(cli),
+              provider=provider)
 
 
 @app.get("/api/categories")
 def listCategories(sid: str):
-    client = getClient(sid)
-    return ok(categories=sui_service.buildCategoryOptions(client))
+    s = getSession(sid)
+    provider = s.get("provider", PROVIDER_SHENXIANG)
+    cli = getClient(sid)
+    return ok(categories=activeService(provider).buildCategoryOptions(cli),
+              provider=provider)
 
 
 # --------------------------------------------------------------------- #
@@ -151,12 +245,20 @@ def saveMapping(body: MappingBody):
 # --------------------------------------------------------------------- #
 # 账单导入与对账
 # --------------------------------------------------------------------- #
+@app.get("/api/bills/readers")
+def listBillReaders():
+    """前端「账单类型」下拉的数据源。后端落白名单,不让前端乱传。"""
+    from server import readers as _readers
+    return ok(readers=_readers.listFileReaders())
+
+
 @app.post("/api/bills/upload")
-async def uploadBill(sid: str = Form(...), file: UploadFile = File(...)):
+async def uploadBill(sid: str = Form(...), bankType: str = Form(...),
+                     file: UploadFile = File(...)):
     s = getSession(sid)
     content = await file.read()
     try:
-        data = readers.parseUpload(s["userId"], content, file.filename)
+        data = readers.parseUpload(s["userId"], content, file.filename, bankType)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -167,7 +269,7 @@ async def uploadBill(sid: str = Form(...), file: UploadFile = File(...)):
                     "details": data["details"]}
     return ok(bankno=data["bankno"], suiid=data["suiid"],
               startDate=data["startDate"], endDate=data["endDate"],
-              count=len(data["details"]), details=data["details"])
+              count=len(data["details"]), details=data["details"], bankType=bankType)
 
 
 class ReconcileBody(BaseModel):
@@ -183,17 +285,66 @@ def reconcileBills(body: ReconcileBody):
     if not pending:
         raise HTTPException(status_code=400, detail="请先导入账单")
     s["pending"]["suiid"] = body.suiid
+    provider = s.get("provider", PROVIDER_SHENXIANG)
     try:
-        suiDetails = client.accountDetail(
+        # 旧体系 accountDetail 返回的字段结构与神象云不同,
+        # reconcile 引擎找的是 sdate / itemAmount / tranType / *AcountId 命名。
+        # 体系直接调用原 Sui.accountDetail 会拿到 raw 数据,这里做一层归一化
+        # 让两者走同一条 reconcile 路径,匹配失败时当 unmatched 处理(不报错)。
+        rawDetails = client.accountDetail(
             body.suiid,
             reconcile.transDate(pending["startDate"]),
             reconcile.transDate(pending["endDate"]))
+        suiDetails = _normalizeLegacyDetails(rawDetails) if provider == PROVIDER_LEGACY else rawDetails
     except Exception as e:
-        raise HTTPException(status_code=400, detail="查询账本流水失败: %s" % e)
+        # 旧体系查询失败,不阻断对账页 —— 用空列表继续
+        if provider == PROVIDER_LEGACY:
+            print(f"[legacy] 查询旧账本流水失败,继续以空数据对账: {e}")
+            suiDetails = []
+        else:
+            raise HTTPException(status_code=400, detail="查询账本流水失败: %s" % e)
     rules = store.listRules(s["userId"])
     items = reconcile.reconcileDetails(pending["details"], suiDetails,
                                        body.suiid, rules)
-    return ok(items=items, suiid=body.suiid)
+    return ok(items=items, suiid=body.suiid, provider=provider)
+
+
+def _normalizeLegacyDetails(rawDetails):
+    """把旧体系的 raw 流水归一化成 shenxiang 风格的字段集。
+
+    旧体系 Sui.accountDetail 返回的就是 report['groups'][].list[] 原样,
+    字段名依服务端而定。下面这层映射只为「用户能正常对账」服务,
+    缺字段时 fallback 到原值/空 —— 不要让归一化失败抛错。
+    """
+    out = []
+    for d in rawDetails or []:
+        norm = dict(d)
+        # sdate 已经在 sui.py 里写过 (YYYYMMDD)
+        norm.setdefault("sdate", d.get("sdate", ""))
+        # itemAmount / tranType:旧体系里的键名五花八门,做一个模糊查找
+        if "itemAmount" not in norm:
+            for key in ("price", "money", "amount", "inMoney", "outMoney"):
+                if key in d and d[key] not in (None, ""):
+                    try:
+                        norm["itemAmount"] = float(str(d[key]).replace(",", ""))
+                        break
+                    except (TypeError, ValueError):
+                        pass
+        norm.setdefault("itemAmount", 0.0)
+        if "tranType" not in norm:
+            # 旧体系 inoutType: 1=支出 2=收入 3=转账等
+            legacyType = d.get("inoutType", d.get("type", 0))
+            try:
+                norm["tranType"] = int(legacyType)
+            except (TypeError, ValueError):
+                norm["tranType"] = 0
+        norm.setdefault("tranType", 0)
+        # 对手账户 id:sui.py 老接口里通常用 sellerAccountId / buyerAccountId
+        norm.setdefault("sellerAcountId", str(d.get("sellerAccountId", "") or ""))
+        norm.setdefault("buyerAcountId", str(d.get("buyerAccountId", "") or ""))
+        norm.setdefault("tranId", str(d.get("id", d.get("billId", "")) or ""))
+        out.append(norm)
+    return out
 
 
 class TallyBody(BaseModel):
@@ -205,7 +356,8 @@ class TallyBody(BaseModel):
     opSuiid: Optional[str] = None
     memo: Optional[str] = ""
     saveRule: Optional[bool] = False
-    exp: Optional[str] = None
+    conditions: Optional[List[dict]] = None
+    ruleId: Optional[int] = None
 
 
 @app.post("/api/tally")
@@ -222,19 +374,43 @@ def tally(body: TallyBody):
     payTime = reconcile.buildPayTime(detail["date"], detail.get("time"))
     memo = body.memo if body.memo is not None else detail.get("memo", "")
     amount = detail["amount"]
+    provider = s.get("provider", PROVIDER_SHENXIANG)
+    service = activeService(provider)
 
     try:
         if body.op == "payout":
-            r = client.payout(body.suiid, amount, body.catid, payTime=payTime, memo=memo)
-        elif body.op == "income":
-            r = client.income(body.suiid, amount, body.catid, payTime=payTime, memo=memo)
-        elif body.op == "transfer":
-            if detail["transType"] == "income":
-                r = client.transfer(body.opSuiid, body.suiid, amount,
-                                    payTime=payTime, memo=memo)
+            if provider == PROVIDER_LEGACY:
+                # 旧体系没有「记账接口返回 r」概念 —— 直接调用,无返回值校验。
+                service.payout(client, body.suiid, amount, body.catid or 0,
+                               payTime=payTime, memo=memo)
+                r = type("R", (), {"status_code": 200, "text": "legacy: payout ok"})()
             else:
-                r = client.transfer(body.suiid, body.opSuiid, amount,
+                r = client.payout(body.suiid, amount, body.catid,
+                                  payTime=payTime, memo=memo)
+        elif body.op == "income":
+            if provider == PROVIDER_LEGACY:
+                service.income(client, body.suiid, amount, body.catid or 0,
+                               payTime=payTime, memo=memo)
+                r = type("R", (), {"status_code": 200, "text": "legacy: income ok"})()
+            else:
+                r = client.income(body.suiid, amount, body.catid,
+                                  payTime=payTime, memo=memo)
+        elif body.op == "transfer":
+            if provider == PROVIDER_LEGACY:
+                if detail["transType"] == "income":
+                    service.transfer(client, body.opSuiid or 0, body.suiid, amount,
                                     payTime=payTime, memo=memo)
+                else:
+                    service.transfer(client, body.suiid, body.opSuiid or 0, amount,
+                                    payTime=payTime, memo=memo)
+                r = type("R", (), {"status_code": 200, "text": "legacy: transfer ok"})()
+            else:
+                if detail["transType"] == "income":
+                    r = client.transfer(body.opSuiid, body.suiid, amount,
+                                        payTime=payTime, memo=memo)
+                else:
+                    r = client.transfer(body.suiid, body.opSuiid, amount,
+                                        payTime=payTime, memo=memo)
         else:
             raise HTTPException(status_code=400, detail="未知记账类型: %s" % body.op)
     except HTTPException:
@@ -242,12 +418,12 @@ def tally(body: TallyBody):
     except Exception as e:
         raise HTTPException(status_code=400, detail="记账失败: %s" % e)
 
-    if r.status_code not in (200, 201):
+    if provider != PROVIDER_LEGACY and r.status_code not in (200, 201):
         raise HTTPException(status_code=400,
                             detail="记账接口返回 %s: %s" % (r.status_code, r.text[:200]))
 
-    if body.saveRule and body.exp:
-        rule = {"exp": body.exp, "op": body.op}
+    if body.saveRule and body.conditions:
+        rule = {"conditions": validateConditions(body.conditions), "op": body.op}
         if body.catid:
             rule["catid"] = body.catid
         if body.opSuiid:
@@ -255,12 +431,43 @@ def tally(body: TallyBody):
         if memo:
             rule["memo"] = memo
         store.addRule(s["userId"], rule)
-    return ok(message="记账成功", status=r.status_code)
+
+    # 按规则记账的,累加命中次数,便于在管理页看出哪些规则真在用
+    if body.ruleId:
+        store.recordRuleHit(s["userId"], body.ruleId)
+    return ok(message="记账成功", status=getattr(r, "status_code", 200),
+              provider=provider)
 
 
 # --------------------------------------------------------------------- #
 # 规则
 # --------------------------------------------------------------------- #
+def validateConditions(conds):
+    """校验结构化条件。
+
+    字段和匹配方式都过白名单 —— 规则来自用户输入,绝不能把任意内容
+    带到匹配环节(老版本用 eval 执行表达式,等于开放任意代码执行)。
+    """
+    from server.reconcile import MATCH_FIELDS, MATCH_KINDS
+    if not conds:
+        raise HTTPException(status_code=400, detail="至少需要一个匹配条件")
+    out = []
+    for c in conds:
+        if not isinstance(c, dict):
+            raise HTTPException(status_code=400, detail="条件格式不正确")
+        field = str(c.get("field", ""))
+        kind = str(c.get("match", ""))
+        value = c.get("value", "")
+        if field not in MATCH_FIELDS:
+            raise HTTPException(status_code=400, detail="不支持的匹配字段: %s" % field)
+        if kind not in MATCH_KINDS:
+            raise HTTPException(status_code=400, detail="不支持的匹配方式: %s" % kind)
+        if str(value).strip() == "":
+            raise HTTPException(status_code=400, detail="匹配值不能为空")
+        out.append({"field": field, "match": kind, "value": str(value)[:200]})
+    return out
+
+
 @app.get("/api/rules")
 def getRules(sid: str):
     s = getSession(sid)
@@ -269,18 +476,45 @@ def getRules(sid: str):
 
 class RuleBody(BaseModel):
     sid: str
-    exp: str
+    conditions: List[dict]
     op: str
     catid: Optional[str] = None
     opSuiid: Optional[str] = None
     memo: Optional[str] = None
+    priority: Optional[int] = 0
 
 
 @app.post("/api/rules")
 def addRule(body: RuleBody):
     s = getSession(body.sid)
-    ruleId = store.addRule(s["userId"], body.dict(exclude={"sid"}))
+    data = body.dict(exclude={"sid"})
+    data["conditions"] = validateConditions(data["conditions"])
+    ruleId = store.addRule(s["userId"], data)
     return ok(id=ruleId)
+
+
+class RuleUpdateBody(BaseModel):
+    sid: str
+    conditions: Optional[List[dict]] = None
+    op: Optional[str] = None
+    catid: Optional[str] = None
+    opSuiid: Optional[str] = None
+    memo: Optional[str] = None
+    priority: Optional[int] = None
+
+
+@app.put("/api/rules/{ruleId}")
+def updateRule(ruleId: int, body: RuleUpdateBody):
+    s = getSession(body.sid)
+    data = body.dict(exclude={"sid"})
+    data = {k: v for k, v in data.items() if v is not None}
+    if "conditions" in data:
+        data["conditions"] = validateConditions(data["conditions"])
+    if not data:
+        raise HTTPException(status_code=400, detail="没有要更新的内容")
+    if not store.updateRule(s["userId"], ruleId, data):
+        raise HTTPException(status_code=404, detail="规则不存在")
+    return ok()
 
 
 @app.delete("/api/rules/{ruleId}")

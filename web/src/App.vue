@@ -1,7 +1,9 @@
 <template>
   <div class="app">
     <LoginView v-if="!state.bookId" @logged-in="onLoggedIn" />
-    <BillsView v-else @logout="onLogout" @switch-book="onSwitchBook" />
+    <RulesView v-else-if="state.view === 'rules'" @back="onBackFromRules" />
+    <BillsView v-else @logout="onLogout" @switch-book="onSwitchBook"
+               @open-rules="onOpenRules" />
   </div>
 </template>
 
@@ -9,8 +11,9 @@
 import { onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import LoginView from './views/LoginView.vue'
+import RulesView from './views/RulesView.vue'
 import BillsView from './views/BillsView.vue'
-import { state, api, saveLocal, clearLocal, leaveBook, saveGmailCreds } from './api.js'
+import { state, api, saveLocal, clearLocal, leaveBook, saveGmailCreds, setView } from './api.js'
 
 // Gmail OAuth 回调会带 ?gmail=ok&sid=xxx 回到前端。
 // 授权成功后立刻把凭据领回存到浏览器 —— 这样退出登录、服务重启都不用重新授权。
@@ -39,6 +42,16 @@ onMounted(async () => {
 })
 
 function onLoggedIn() {}
+
+// 切到规则管理页
+function onOpenRules() {
+  setView('rules')
+}
+
+// 从规则管理页返回对账页
+function onBackFromRules() {
+  setView('')
+}
 
 function onLogout() {
   clearLocal()

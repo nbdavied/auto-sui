@@ -45,7 +45,12 @@ import hashlib
 import random
 import uuid
 import re
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+# 神象云返回的 transaction_time 是 Unix 毫秒,业务侧始终按北京时间理解。
+# 不强制 datetime(..., tzinfo=...)=UTC 是因为服务器可能跑在任何时区。
+# 注意:这条常量只用于「账本流水日期」语义 —— 如果未来要支持海外账本,再扩展。
+_BEIJING_TZ = timezone(timedelta(hours=8))
 
 # 登录签名用的 Client-Key (生产环境)
 AUTH_CLIENT_KEY = "520BFC1EA31D45678A9B865668A47F40"
@@ -520,7 +525,11 @@ class ShenxiangClient:
 
     @staticmethod
     def __mapDetail(item):
-        """把神象云流水中转成老 sui 对账兼容结构。"""
+        """把神象云流水中转成老 sui 对账兼容结构,顺便留住展示所需字段。
+
+        兼容字段(sdate/tranId/sellerAcountId/buyerAcountId/itemAmount/tranType)
+        决定对账匹配,不能动。新增字段全部带 detail 前缀,避免与老结构冲突。
+        """
         bt = item.get("business_type")
         # 余额调整流水不参与对账
         if bt == "Balance_Changed":
@@ -529,10 +538,12 @@ class ShenxiangClient:
         if ts:
             try:
                 tsInt = int(ts)
-                if tsInt > 10 ** 12:  # 毫秒
-                    sdate = datetime.fromtimestamp(tsInt / 1000).strftime("%Y%m%d")
-                else:  # 秒
-                    sdate = datetime.fromtimestamp(tsInt).strftime("%Y%m%d")
+                # 毫秒或秒 → 一律先归一化成秒
+                seconds = tsInt / 1000 if tsInt > 10 ** 12 else tsInt
+                # 服务器所在的时区不一定是北京,但账本业务是北京时间,
+                # 所以 sdate 与 detailTransactionTime 都按 Asia/Shanghai 算。
+                d = datetime.fromtimestamp(seconds, tz=_BEIJING_TZ)
+                sdate = d.strftime("%Y%m%d")
             except Exception:
                 sdate = ""
         else:
@@ -545,18 +556,50 @@ class ShenxiangClient:
             "buyerAcountId": "",
             "itemAmount": 0.0,
             "tranType": 0,
+            # 展示用字段。命名都加 detail 前缀,避免未来冲突。
+            "detailRemark": item.get("remark", "") or "",
+            "detailTransactionTime": ts,                  # 原值,毫秒或秒
+            "detailCategoryId": "",
+            "detailCategoryName": "",
+            "detailAccountId": "",
+            "detailAccountName": "",
+            "detailFromAccountId": "",
+            "detailFromAccountName": "",
+            "detailToAccountId": "",
+            "detailToAccountName": "",
+            "detailMemberId": (item.get("member") or {}).get("id", "") if item.get("member") else "",
+            "detailMemberName": (item.get("member") or {}).get("name", "") if item.get("member") else "",
+            "detailMerchant": (item.get("merchant") or {}).get("name", "") if item.get("merchant") else "",
         }
+        cat = item.get("category") or {}
+        if isinstance(cat, dict):
+            detail["detailCategoryId"] = str(cat.get("id", ""))
+            detail["detailCategoryName"] = cat.get("name", "") or ""
         if bt == "Expense":
             detail["tranType"] = 1
             detail["itemAmount"] = float(item.get("amount") or 0)
+            # 支出:account=本账户(从这个账户出钱)
+            acc = item.get("account") or {}
+            detail["detailAccountId"] = str(acc.get("id", ""))
+            detail["detailAccountName"] = acc.get("name", "") or ""
         elif bt == "Income":
             detail["tranType"] = 5
             detail["itemAmount"] = float(item.get("amount") or 0)
+            acc = item.get("account") or {}
+            detail["detailAccountId"] = str(acc.get("id", ""))
+            detail["detailAccountName"] = acc.get("name", "") or ""
         elif bt == "Transfer":
             detail["tranType"] = 2
             detail["itemAmount"] = float(item.get("from_amount") or item.get("to_amount") or 0)
             fa = item.get("from_account") or {}
             ta = item.get("to_account") or {}
+            detail["detailFromAccountId"] = str(fa.get("id", ""))
+            detail["detailFromAccountName"] = fa.get("name", "") or ""
+            detail["detailToAccountId"] = str(ta.get("id", ""))
+            detail["detailToAccountName"] = ta.get("name", "") or ""
+            # 转账的本账户概念略模糊,这里把转出账户放在 detailAccountName
+            detail["detailAccountId"] = str(fa.get("id", ""))
+            detail["detailAccountName"] = fa.get("name", "") or ""
             detail["buyerAcountId"] = str(fa.get("id", ""))
             detail["sellerAcountId"] = str(ta.get("id", ""))
         else:

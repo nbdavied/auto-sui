@@ -10,6 +10,7 @@
         </el-select>
       </div>
       <div class="actions">
+        <el-button link @click="emit('open-rules')">自动记账规则</el-button>
         <el-button link @click="emit('switch-book')">切换账本</el-button>
         <el-button link @click="emit('logout')">退出</el-button>
       </div>
@@ -18,15 +19,23 @@
     <el-card class="import-card">
       <el-tabs v-model="tab">
         <el-tab-pane label="上传账单" name="upload">
+          <div class="upload-row">
+            <span class="lbl">账单类型</span>
+            <el-select v-model="bankType" placeholder="请选择" style="width:240px"
+                       :disabled="!billReaders.length">
+              <el-option v-for="r in billReaders" :key="r.type"
+                         :label="r.label" :value="r.type" />
+            </el-select>
+          </div>
           <el-upload :auto-upload="false" :show-file-list="true" :limit="1"
                      accept=".xlsx,.xls" :on-change="onFileChange" :on-remove="() => file = null">
-            <el-button>选择账单文件</el-button>
+            <el-button :disabled="!bankType">选择账单文件</el-button>
             <template #tip>
-              <div class="tip">支持农行 abc*.xlsx、建行 hqmx*.xlsx</div>
+              <div class="tip">先选类型再选文件；解析时会把类型传给后端，不再看文件名</div>
             </template>
           </el-upload>
           <el-button type="primary" style="margin-top:12px" :loading="loading"
-                     :disabled="!file" @click="doUpload">解析账单</el-button>
+                     :disabled="!file || !bankType" @click="doUpload">解析账单</el-button>
         </el-tab-pane>
 
         <el-tab-pane label="Gmail 账单" name="gmail">
@@ -88,11 +97,21 @@
             <el-tag v-else type="info" size="small">待记账</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="账本记录" width="180">
+        <el-table-column label="账本记录" width="200">
           <template #default="{ row }">
-            <span v-if="row.matched" class="matched-info">
-              {{ typeName(row.matched.tranType) }} {{ row.matched.itemAmount }}
-            </span>
+            <!--
+              悬停展开,展示账本里的全貌(分类、对方账户、备注、时间)。
+              触发方式用 hover —— 鼠标经过就浮起来,比对账时的快速核对够用。
+            -->
+            <el-popover v-if="row.matched"
+                        placement="left-start" trigger="hover"
+                        :width="340" :show-arrow="true">
+              <template #reference>
+                <span class="matched-info link">{{ typeName(row.matched.tranType) }}
+                  {{ row.matched.itemAmount }}</span>
+              </template>
+              <MatchedRecord :matched="row.matched" />
+            </el-popover>
             <span v-else>-</span>
           </template>
         </el-table-column>
@@ -106,7 +125,8 @@
     </el-card>
 
     <TallyDialog v-model="dialogVisible" :detail="currentDetail" :accounts="state.accounts"
-                 :categories="state.categories" @submit="doTally" />
+                 :categories="state.categories" :preselect-rule="currentRule"
+                 @submit="doTally" />
   </div>
 </template>
 
@@ -114,9 +134,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import TallyDialog from '../components/TallyDialog.vue'
+import MatchedRecord from '../components/MatchedRecord.vue'
 import { state, api, formatDate, getGmailCreds, saveGmailCreds, clearGmailCreds } from '../api.js'
 
-const emit = defineEmits(['logout', 'switch-book'])
+const emit = defineEmits(['logout', 'switch-book', 'open-rules'])
 
 const tab = ref('upload')
 const file = ref(null)
@@ -128,6 +149,12 @@ const gmailOk = computed(() => !!state.gmailCreds)
 const dialogVisible = ref(false)
 const currentDetail = ref(null)
 const currentIndex = ref(-1)
+const currentRule = ref(null)
+
+// 用户在页面上选择的账单类型。空表示还没选 —— 文件按钮与解析按钮都被禁。
+const bankType = ref('')
+// 后端返回的白名单[{type, label}],进入页面一次性拉,只读不写
+const billReaders = ref([])
 
 onMounted(async () => {
   if (!state.accounts.length) {
@@ -138,6 +165,14 @@ onMounted(async () => {
     const r = await api.categories(state.sid)
     state.categories = r.categories
   }
+  // 拉后端白名单。失败也不阻塞 —— 至少留一个空下拉提示用户。
+  try {
+    const r = await api.listBillReaders()
+    billReaders.value = r.readers || []
+    if (!bankType.value && billReaders.value.length) bankType.value = billReaders.value[0].type
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '无法读取账单类型列表')
+  }
 })
 
 function onFileChange(uploadFile) {
@@ -147,7 +182,7 @@ function onFileChange(uploadFile) {
 async function doUpload() {
   loading.value = true
   try {
-    const r = await api.upload(state.sid, file.value)
+    const r = await api.upload(state.sid, file.value, bankType.value)
     state.bankno = r.bankno
     state.bills = r.details.map(d => ({ ...d, status: 'pending' }))
     state.source = 'upload'
@@ -191,9 +226,12 @@ function typeName(t) {
 function openTally(row, index) {
   currentDetail.value = row
   currentIndex.value = index
-  // 规则命中的预填规则里的分类
+  // 规则命中的预填规则里的分类,并记住规则 id —— 真正记账时回传累加命中次数
   if (row.rule) {
     row.ruleCatid = row.rule.catid
+    currentRule.value = row.rule
+  } else {
+    currentRule.value = null
   }
   dialogVisible.value = true
 }
@@ -227,7 +265,8 @@ async function autoTallyAll() {
         op: b.rule.op,
         catid: b.rule.catid || null,
         opSuiid: b.rule.opSuiid || null,
-        memo: b.rule.memo || b.memo || ''
+        memo: b.rule.memo || b.memo || '',
+        ruleId: b.rule.id  // 让后端累加这条规则的命中次数
       })
       n++
     }
@@ -332,6 +371,18 @@ async function loadSelected() {
   align-items: center;
   gap: 10px;
 }
+.upload-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.upload-row .lbl {
+  font-size: 13px;
+  color: #606266;
+  width: 64px;
+  text-align: right;
+}
 .list-header {
   display: flex;
   justify-content: space-between;
@@ -352,5 +403,11 @@ async function loadSelected() {
 .matched-info {
   color: #909399;
   font-size: 12px;
+}
+/* 账本记录有悬停弹窗 —— 给点视觉提示,鼠标移上去像可点 */
+.matched-info.link {
+  color: #409eff;
+  cursor: help;
+  border-bottom: 1px dashed rgba(64, 158, 255, 0.5);
 }
 </style>
