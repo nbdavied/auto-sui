@@ -798,7 +798,14 @@ def gmailMails(body: GmailMailsBody):
         service = gmail_service.buildService(creds)
         mails = gmail_service.listTallyMails(service, body.maxResults)
     except Exception as e:
-        raise HTTPException(status_code=400, detail="读取邮件失败: %s" % e)
+        # 把真实异常打进服务端日志(journald 只看得到 400 状态行,看不到响应体),
+        # 并带上当前代理配置,便于区分: 本地 DNS 超时 / 代理连不通 / SSL 错误
+        traceback.print_exc()
+        pinfo = gmail_service.proxyInfo()
+        raise HTTPException(
+            status_code=400,
+            detail="读取邮件失败[%s via %s]: %s: %s"
+            % (type(e).__name__, pinfo.get("proxy"), type(e).__module__, e))
     return ok(mails=mails, creds=gmail_service.credsToJson(creds))
 
 
