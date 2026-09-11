@@ -54,14 +54,28 @@ def __http():
 
     googleapiclient 不用 requests,所以 here 必须手动把代理塞进去,
     否则「授权成功但读邮件超时」——授权走 requests(认环境变量),读邮件走 httplib2(不认)。
+
+    注意 httplib2 0.32+ 已把 PROXY_TYPE_HTTP 等常量从顶层移除,只留在 socks 模块里:
+      - HTTP/HTTPS 代理 httplib2 原生支持,直接传常量 3,无需 PySocks;
+      - SOCKS 代理才依赖 PySocks(pip install pysocks),缺失时明确报错,而不是抛出
+        难懂的 "'NoneType' object has no attribute 'PROXY_TYPE_HTTP'"。
     """
     h = httplib2.Http(timeout=GOOGLE_TIMEOUT)
     if PROXY_URL:
         from urllib.parse import urlparse
-        from httplib2 import socks
         p = urlparse(PROXY_URL)
-        ptype = (socks.PROXY_TYPE_SOCKS5 if p.scheme.startswith("socks")
-                 else socks.PROXY_TYPE_HTTP)
+        if p.scheme.startswith("socks"):
+            try:
+                from httplib2 import socks
+            except ImportError:
+                socks = None
+            if socks is None:
+                raise RuntimeError(
+                    "SOCKS 代理需要 PySocks,请在 venv 执行: pip install pysocks")
+            ptype = socks.PROXY_TYPE_SOCKS5
+        else:
+            # HTTP/HTTPS 代理无需 PySocks,直接传常量 3
+            ptype = 3  # httplib2.ProxyInfo PROXY_TYPE_HTTP
         h.proxy_info = httplib2.ProxyInfo(ptype, p.hostname, p.port)
     return h
 
