@@ -1,0 +1,20 @@
+[Unit]
+Description=auto-sui 银行流水自动记账服务
+After=network.target
+
+[Service]
+Type=simple
+# 安装脚本会把下面两个占位符替换成真实路径/用户名
+User=__SERVICE_USER__
+Group=__SERVICE_USER__
+WorkingDirectory=__INSTALL_DIR__
+# 所有环境变量(代理/域名/会话落盘)都集中在这个文件里,改完 restart 即可
+EnvironmentFile=/etc/auto-sui/env
+ExecStart=__INSTALL_DIR__/venv/bin/python run_server.py
+Restart=on-failure
+RestartSec=5
+# 限制资源,避免异常时拖垮机器
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

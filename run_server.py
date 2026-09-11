@@ -26,8 +26,11 @@ os.environ.setdefault("AUTOSUI_SESSION_FILE", os.path.join(HERE, "sessions.db"))
 import uvicorn  # noqa: E402
 
 if __name__ == "__main__":
+    # HOST 默认 0.0.0.0(本地/容器友好);生产用 nginx 反代时建议设 127.0.0.1,
+    # 只让本机 nginx 访问,对外只暴露 80/443。
+    host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "8000"))
     reload = os.environ.get("RELOAD", "1") == "1"
-    print("启动 auto-sui 服务: http://127.0.0.1:%d" % port)
+    print("启动 auto-sui 服务: http://%s:%d" % (host, port))
     print("会话持久化: %s" % (os.environ.get("AUTOSUI_SESSION_FILE") or "(内存模式)"))
-    uvicorn.run("server.main:app", host="0.0.0.0", port=port, reload=reload)
+    uvicorn.run("server.main:app", host=host, port=port, reload=reload)
