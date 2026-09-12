@@ -13,4 +13,4 @@ google-api-python-client
 google-auth-oauthlib
 google-auth-httplib2
 httplib2
-pysocks   # httplib2 走 SOCKS 代理时需要;HTTP 代理已用常量规避,但装上更稳妥
+pysocks   # httplib2 走代理(HTTP/SOCKS 都需要)必须装;缺失时 httplib2.socks 为 None、ProxyInfo.isgood() 恒 False,代理被静默丢弃、直连 Google 超时

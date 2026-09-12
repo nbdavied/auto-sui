@@ -60,10 +60,11 @@ def __http():
     googleapiclient 不用 requests,所以 here 必须手动把代理塞进去,
     否则「授权成功但读邮件超时」——授权走 requests(认环境变量),读邮件走 httplib2(不认)。
 
-    注意 httplib2 0.32+ 已把 PROXY_TYPE_HTTP 等常量从顶层移除,只留在 socks 模块里:
-      - HTTP/HTTPS 代理 httplib2 原生支持,直接传常量 3,无需 PySocks;
-      - SOCKS 代理才依赖 PySocks(pip install pysocks),缺失时明确报错,而不是抛出
-        难懂的 "'NoneType' object has no attribute 'PROXY_TYPE_HTTP'"。
+    注意 httplib2 的 socks 子模块依赖 PySocks: 无论 HTTP 还是 SOCKS 代理,
+    venv 里没装 pysocks 时 httplib2.socks 为 None, 导致 ProxyInfo.isgood() 恒为
+    False, 代理被静默丢弃、直接连 Google(境内即超时 —— 这正是本项目的线上故障)。
+    所以部署必须 pip install pysocks。PROXY_TYPE_HTTP 常量用 3 即可(0.32+ 已从
+    顶层移除, 但 ProxyInfo 仍接受整数常量)。
 
     关键: proxy_info 必须传给 httplib2.Http 的构造函数,不能只事后 h.proxy_info=... 赋值 ——
     部分 httplib2 版本里事后赋值不生效,现象就是「代码是最新的、env 也有代理,但读邮件仍直连超时」。
