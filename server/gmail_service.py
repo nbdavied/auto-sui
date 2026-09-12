@@ -43,6 +43,11 @@ PROXY_URL = (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
              or "").strip()
 GOOGLE_TIMEOUT = float(os.environ.get("GOOGLE_TIMEOUT", "15"))
 
+# 启动/首次导入时打一行: 直接确认代理有没有被代码读到。
+# 部署排错时 journalctl -u auto-sui 里看这一行即可, 不必再登进去敲命令。
+print("[gmail_service] proxy=%s timeout=%s"
+      % (PROXY_URL or "(直连)", GOOGLE_TIMEOUT), flush=True)
+
 
 def proxyInfo():
     """当前代理配置,供诊断用。"""
@@ -59,8 +64,11 @@ def __http():
       - HTTP/HTTPS 代理 httplib2 原生支持,直接传常量 3,无需 PySocks;
       - SOCKS 代理才依赖 PySocks(pip install pysocks),缺失时明确报错,而不是抛出
         难懂的 "'NoneType' object has no attribute 'PROXY_TYPE_HTTP'"。
+
+    关键: proxy_info 必须传给 httplib2.Http 的构造函数,不能只事后 h.proxy_info=... 赋值 ——
+    部分 httplib2 版本里事后赋值不生效,现象就是「代码是最新的、env 也有代理,但读邮件仍直连超时」。
     """
-    h = httplib2.Http(timeout=GOOGLE_TIMEOUT)
+    proxy_info = None
     if PROXY_URL:
         from urllib.parse import urlparse
         p = urlparse(PROXY_URL)
@@ -76,7 +84,10 @@ def __http():
         else:
             # HTTP/HTTPS 代理无需 PySocks,直接传常量 3
             ptype = 3  # httplib2.ProxyInfo PROXY_TYPE_HTTP
-        h.proxy_info = httplib2.ProxyInfo(ptype, p.hostname, p.port)
+        proxy_info = httplib2.ProxyInfo(ptype, p.hostname, p.port)
+    # 传给构造函数(同时兜底赋值属性),确保不同 httplib2 版本都生效
+    h = httplib2.Http(timeout=GOOGLE_TIMEOUT, proxy_info=proxy_info)
+    h.proxy_info = proxy_info
     return h
 
 # 账单邮件发件人(与 run.py 的路由保持一致)
