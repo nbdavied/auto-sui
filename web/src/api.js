@@ -69,7 +69,10 @@ export const state = reactive({
   suiid: '',
   source: '',
   gmailCreds: localStorage.getItem(KEY.gmailCreds) || '',
-  view: localStorage.getItem(VIEW_KEY) || ''
+  view: localStorage.getItem(VIEW_KEY) || '',
+  // 主会话失效标记: expireSession() 置位,LoginView 挂载后据此提示「登录已过期」。
+  // 仅作前端提示用,不持久化。
+  sessionExpired: false
 })
 
 export function saveLocal(patch = {}) {
@@ -115,11 +118,35 @@ export function leaveBook() {
 
 const http = axios.create({ baseURL: '/api', timeout: 60000 })
 
+// 主会话失效: 清掉「会话态 + 当前账本」,但保留账号密码(供 LoginView 自动重登)
+// 与 Gmail 凭据(跨登录保留),让 App 切回 LoginView。
+// 注意: 不能用 clearLocal() —— 它会把账号密码和 Gmail 凭据也一起清掉,
+// 那样退出后又要重新输密码 / 重新授权。
+function expireSession() {
+  state.sessionExpired = true
+  state.sid = ''
+  state.bookId = ''
+  state.bookName = ''
+  localStorage.removeItem(KEY.sid)
+  localStorage.removeItem(KEY.bookId)
+  localStorage.removeItem(KEY.bookName)
+}
+
 http.interceptors.response.use(
   res => res.data,
   err => {
     if (err.response && err.response.status === 401) {
-      state.sid = ''
+      const detail = (err.response.data && err.response.data.detail) || ''
+      // Gmail 授权相关的 401(未授权 / refresh_token 失效)由 BillsView.handleGmailError
+      // 处理(只清 Gmail 凭据、提示重新授权)。这里只认「主会话失效」,把 bookId 也
+      // 清掉,App 才会切回 LoginView;若 detail 含 "Gmail" 说明是 Gmail 凭据问题,
+      // 不是主会话失效,不能把用户踢下线。
+      //
+      // 之前只清了 state.sid 却没清 state.bookId: App 一直按 bookId 显示对账页,
+      // 请求反复 401,卡在「看得见账本页却一直在报错」的状态,刷新也不会回到登录页。
+      if (!detail.includes('Gmail')) {
+        expireSession()
+      }
     }
     return Promise.reject(err)
   }

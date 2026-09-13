@@ -133,6 +133,14 @@ onMounted(async () => {
       state.books = []
     }
   }
+  // 主会话刚过期被踢回登录页: 若本地没有可自动重登的账号密码,给个明确提示。
+  // (能自动重登的话会自动跳回对账页,不必提示。)
+  if (state.sessionExpired) {
+    state.sessionExpired = false
+    if (!state.books.length) {
+      ElMessage.warning('登录状态已过期，请重新登录')
+    }
+  }
 })
 
 async function doLogin() {
