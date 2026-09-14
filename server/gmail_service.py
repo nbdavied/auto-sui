@@ -21,7 +21,10 @@ import httplib2                                                # noqa: E402
 import json                                                    # noqa: E402
 from email.utils import parsedate_to_datetime                  # noqa: E402
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+# 归档(改标签)属于「写入」操作,需要 gmail.modify 权限;
+# gmail.readonly 是纯只读,调 messages().modify() 会被 Google 用 403 拒绝。
+# gmail.modify 是 readonly 的超集(既能读也能改标签,但不能删邮件),直接用它即可。
+SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 CREDENTIALS_PATH = os.environ.get("GOOGLE_CREDENTIALS",
                                   os.path.join(ROOT, "credentials.json"))
 REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI",
@@ -190,11 +193,21 @@ def credsToJson(creds):
 
 
 def credsFromJson(text):
-    """从前端传回的 JSON 还原凭据;格式不对返回 None。"""
+    """从前端传回的 JSON 还原凭据;格式不对、或已存令牌权限不足(如只有 readonly)返回 None。
+
+    注意: google 的 from_authorized_user_info 不会校验 scope —— 它直接把传入的
+    SCOPES 覆盖到 creds.scopes 上。也就是说一个实际只有 gmail.readonly 的旧令牌,
+    加载时会被「谎称」拥有 gmail.modify,但真正调 modify 接口时 Google 仍会 403。
+    所以这里必须自己比对待存 JSON 里的 scopes 字段: 若不含当前所需全部 scope,
+    视为未授权,逼迫前端删掉旧凭据、引导用户重新授权,从而拿到真正带 modify 的新令牌。
+    """
     if not text:
         return None
     try:
         info = json.loads(text)
+        granted = set(info.get("scopes") or [])
+        if not set(SCOPES).issubset(granted):
+            return None
         return Credentials.from_authorized_user_info(info, SCOPES)
     except Exception:
         return None
