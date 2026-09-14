@@ -14,3 +14,4 @@ google-auth-oauthlib
 google-auth-httplib2
 httplib2
 pysocks   # httplib2 走代理(HTTP/SOCKS 都需要)必须装;缺失时 httplib2.socks 为 None、ProxyInfo.isgood() 恒 False,代理被静默丢弃、直连 Google 超时
+pdfplumber   # 中国银行信用卡账单改为 PDF 附件,解析 PDF 必需

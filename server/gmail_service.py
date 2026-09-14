@@ -96,6 +96,7 @@ BILL_SENDERS = [
     "e-statement@creditcard.abchina.com",
     "e-statement@creditcard.abchina.com.cn",
     "ccsvc@message.cmbchina.com",
+    "boczhangdan@bankofchina.com",   # 中国银行信用卡电子账单(PDF 附件)
 ]
 
 
@@ -267,13 +268,52 @@ def __mailContent(messagePart):
     return None
 
 
+def __mailAttachments(service, messagePart, messageId=None):
+    """递归收集 PDF 附件,返回 [{'filename','mimeType','data':bytes}, ...]。
+
+    Gmail 附件有两种存放方式:
+      - 小附件直接内联在 body.data 里;
+      - 大附件只给 attachmentId,需额外调 attachments().get() 拉取字节。
+    两种都处理。无 PDF 时返回空列表。
+    """
+    results = []
+    mime = messagePart.get("mimeType", "")
+    if mime.startswith("multipart"):
+        for part in messagePart.get("parts", []):
+            results.extend(__mailAttachments(service, part, messageId))
+        return results
+    fname = (messagePart.get("filename") or "")
+    mime_l = mime.lower()
+    if not ("pdf" in mime_l or fname.lower().endswith(".pdf")):
+        return results
+    body = messagePart.get("body", {})
+    data_b64 = body.get("data")
+    if not data_b64 and body.get("attachmentId"):
+        try:
+            att = (service.users().messages().attachments()
+                   .get(userId="me", messageId=messageId, id=body["attachmentId"])
+                   .execute())
+            data_b64 = att.get("data")
+        except Exception:
+            data_b64 = None
+    if data_b64:
+        raw = base64.urlsafe_b64decode(data_b64)
+        results.append({"filename": fname or "statement.pdf",
+                        "mimeType": mime, "data": raw})
+    return results
+
+
 def getMail(service, messageId):
-    """取邮件正文 HTML + 头信息。"""
+    """取邮件正文 HTML + 头信息 + PDF 附件(如有)。
+
+    中行信用卡账单以 PDF 附件形式发送,所以这里除了取 HTML 正文(兼容农行/招行),
+    还要把 PDF 附件抽出来放进 attachments,供 BOCPdfReader 解析。
+    即使没有 HTML 正文(纯附件邮件)也照常返回,不再 early-return None。
+    """
     mail = service.users().messages().get(userId="me", id=messageId).execute()
     b64 = __mailContent(mail.get("payload", {}))
-    if not b64:
-        return None
-    html = base64.urlsafe_b64decode(b64).decode("utf-8", errors="ignore")
+    html = base64.urlsafe_b64decode(b64).decode("utf-8", errors="ignore") if b64 else ""
+    attachments = __mailAttachments(service, mail.get("payload", {}), messageId)
     headers = {h["name"]: h["value"]
                for h in mail.get("payload", {}).get("headers", [])}
     return {
@@ -283,6 +323,7 @@ def getMail(service, messageId):
         "Subject": headers.get("Subject", ""),
         "Date": headers.get("Date", ""),
         "data": html,
+        "attachments": attachments,
     }
 
 
@@ -291,6 +332,7 @@ def createReaderByMail(mail):
     import re
     from ABCCreditReader import ABCCreditReader
     from CMBCreditReader import CMBCreditReader
+    from BOCPdfReader import BOCPdfReader
     fromEmail = ""
     try:
         fromEmail = re.findall("<(.*)>", mail["From"])[0]
@@ -301,4 +343,6 @@ def createReaderByMail(mail):
         return ABCCreditReader
     if fromEmail == "ccsvc@message.cmbchina.com":
         return CMBCreditReader
+    if fromEmail == "boczhangdan@bankofchina.com":
+        return BOCPdfReader
     return None
