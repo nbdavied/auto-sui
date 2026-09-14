@@ -1,7 +1,11 @@
 <template>
   <div class="rules">
     <div class="top-bar">
-      <span class="title">自动记账规则</span>
+      <span class="title">自动记账规则
+        <el-tag size="small" type="info" effect="plain" style="margin-left:8px">
+          账本：{{ state.bookName || '未命名' }}
+        </el-tag>
+      </span>
       <div class="actions">
         <el-button link @click="emit('back')">返回对账</el-button>
       </div>
