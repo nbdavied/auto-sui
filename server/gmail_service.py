@@ -255,6 +255,17 @@ def listTallyMails(service, maxResults=30):
     return out
 
 
+def archiveMail(service, messageId):
+    """归档一封邮件: Gmail 的「归档」本质是移除 INBOX 标签。
+
+    归档后邮件会从收件箱消失,但保留在「所有邮件」里、不会被删除,
+    和用户在 Gmail 网页点「归档」的行为完全一致。
+    """
+    service.users().messages().modify(
+        userId="me", id=messageId,
+        body={"removeLabelIds": ["INBOX"]}).execute()
+
+
 def __mailContent(messagePart):
     mimeType = messagePart.get("mimeType", "")
     if mimeType.startswith("multipart"):

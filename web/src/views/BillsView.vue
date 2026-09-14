@@ -56,6 +56,12 @@
             <el-table-column type="selection" width="46" />
             <el-table-column prop="date" label="日期" width="110" />
             <el-table-column prop="subject" label="主题" show-overflow-tooltip />
+            <el-table-column label="操作" width="80" align="right">
+              <template #default="{ row }">
+                <el-button link type="primary" :loading="archivingIds.has(row.id)"
+                           @click="archiveMail(row)">归档</el-button>
+              </template>
+            </el-table-column>
           </el-table>
         </el-tab-pane>
       </el-tabs>
@@ -144,6 +150,8 @@ const file = ref(null)
 const loading = ref(false)
 const mails = ref([])
 const selectedMails = ref([])
+// 正在归档中的邮件 id 集合,用于按钮 loading 态
+const archivingIds = ref(new Set())
 // 凭据存在共享 state 里: 授权回调后父组件领取凭据,这里会自动更新
 const gmailOk = computed(() => !!state.gmailCreds)
 const dialogVisible = ref(false)
@@ -310,6 +318,30 @@ function handleGmailError(e, fallback) {
     mails.value = []
   }
   ElMessage.error(e.response?.data?.detail || fallback)
+}
+
+// 归档单封账单邮件(从收件箱移除,非删除)。成功后从列表移除该行。
+async function archiveMail(mail) {
+  archivingIds.value.add(mail.id)
+  // 触发响应式更新(Set 的 add 不会被 Vue 自动追踪)
+  archivingIds.value = new Set(archivingIds.value)
+  try {
+    const r = await api.gmailArchive(state.sid, [mail.id], getGmailCreds())
+    saveGmailCreds(r.creds)
+    if ((r.succeeded || []).includes(mail.id)) {
+      mails.value = mails.value.filter(m => m.id !== mail.id)
+      ElMessage.success('已归档')
+    } else {
+      const err = (r.failed || [])[0]
+      ElMessage.error((err && err.error) || '归档失败')
+    }
+  } catch (e) {
+    handleGmailError(e, '归档失败')
+  } finally {
+    const s = new Set(archivingIds.value)
+    s.delete(mail.id)
+    archivingIds.value = s
+  }
 }
 
 async function gmailRevoke() {

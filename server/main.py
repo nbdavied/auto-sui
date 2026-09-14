@@ -814,6 +814,46 @@ def gmailMails(body: GmailMailsBody):
     return ok(mails=mails, creds=gmail_service.credsToJson(creds))
 
 
+class GmailArchiveBody(BaseModel):
+    sid: str
+    messageIds: List[str]
+    creds: Optional[str] = None
+
+
+@app.post("/api/gmail/archive")
+def gmailArchive(body: GmailArchiveBody):
+    """归档账单邮件(从收件箱移除 INBOX 标签,非删除)。
+
+    可一次归档多封。部分失败不整批回滚 —— 返回 succeeded/failed 让前端
+    据此更新列表,避免一封失败导致全部都没动、用户又得手动重来。
+    """
+    s = getSession(body.sid)
+    creds = resolveGmailCreds(s, body.creds)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Gmail 未授权")
+    from server import gmail_service
+    try:
+        creds = gmail_service.refreshIfNeeded(creds)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Gmail 授权已失效，请重新授权")
+    service = gmail_service.buildService(creds)
+    succeeded, failed = [], []
+    for mid in body.messageIds:
+        try:
+            gmail_service.archiveMail(service, mid)
+            succeeded.append(mid)
+        except Exception as e:
+            traceback.print_exc()
+            failed.append({"id": mid, "error": str(e)})
+    if not succeeded and failed:
+        pinfo = gmail_service.proxyInfo()
+        raise HTTPException(
+            status_code=400,
+            detail="归档失败[%s via %s]: %s" % (type(failed[0]), pinfo.get("proxy"), failed[0]))
+    return ok(succeeded=succeeded, failed=failed,
+              creds=gmail_service.credsToJson(creds))
+
+
 class GmailLoadBody(BaseModel):
     sid: str
     messageIds: List[str]

@@ -200,6 +200,9 @@ export const api = {
   gmailLoad(sid, messageIds, suiid, creds) {
     return http.post('/gmail/load', { sid, messageIds, suiid, creds })
   },
+  gmailArchive(sid, messageIds, creds) {
+    return http.post('/gmail/archive', { sid, messageIds, creds })
+  },
 
   // ----- 规则 -----
   // 前端使用的字段与匹配方式白名单，与后端 MATCH_FIELDS / MATCH_KINDS 一致。
