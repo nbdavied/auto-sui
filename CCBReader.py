@@ -15,23 +15,31 @@ class CCBReader(BankReader):
         endDateText = sheet['H2'].value
         endDate = re.findall(r'结束日期:(\d+)', endDateText)[0]
         accountInfo = self.getAccountInfo(bankno)
-        rowIter = sheet.rows
-        rowIndex = 0
+        # 找到真正的表头行（含“交易日期”列），表头之后才是明细数据。
+        # 旧版导出在表头前只有 3 行（标题/账户信息/收支合计），本样例在表头前
+        # 多了一行（收支合计），若仍只跳过前 3 行会把表头当数据解析而崩溃。
+        rows = list(sheet.rows)
+        headerIdx = None
+        for i, row in enumerate(rows):
+            if row[0].value == '序号' or row[4].value == '交易日期':
+                headerIdx = i
+                break
+        if headerIdx is None:
+            # 找不到表头时回退：跳过前 3 行（兼容旧版导出）
+            headerIdx = 3
         bankDetails = []
-        for row in rowIter:
-            if rowIndex < 3:
-                rowIndex = rowIndex + 1
-                continue
+        for row in rows[headerIdx + 1:]:
             date = row[4].value
+            if date is None:
+                continue  # 跳过空行/汇总行
             time = '080000'
             amount = row[5].value.replace(',','')
             balance = row[6].value
             opAcc = row[8].value
             opAccName = ''
             opAccNo = ''
-            if opAcc:
-                opAccName = opAcc.split('/')[1]
-                opAccNo = opAcc.split('/')[0]
+            if opAcc and '/' in opAcc:
+                opAccNo, opAccName = opAcc.split('/', 1)
             transBank = ''
             channel = ''
             usage = row[7].value

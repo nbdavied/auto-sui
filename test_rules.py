@@ -133,6 +133,25 @@ def testStructuredCondWhitelist():
     print("[OK] expToConditions 白名单过滤")
 
 
+def testBookIsolation():
+    """规则按账本隔离: 不同账本的规则互不可见,各自独立维护。"""
+    uid = freshUser()
+    # 账本 A(神象云)与账本 B(旧随手记)各建一条规则
+    store.addRule(uid, {"conditions": [{"field": "memo", "match": "eq", "value": "A"}],
+                        "op": "payout", "priority": 10}, bookId="bookA", provider="shenxiang")
+    store.addRule(uid, {"conditions": [{"field": "memo", "match": "eq", "value": "B"}],
+                        "op": "payout", "priority": 10}, bookId="bookB", provider="legacy")
+    # 只看到 A 的规则
+    rulesA = store.listRules(uid, "bookA", "shenxiang")
+    assert len(rulesA) == 1 and json.loads(rulesA[0]["conditions"])[0]["value"] == "A"
+    # 只看到 B 的规则
+    rulesB = store.listRules(uid, "bookB", "legacy")
+    assert len(rulesB) == 1 and json.loads(rulesB[0]["conditions"])[0]["value"] == "B"
+    # 不传账本(老调用方 / 测试)能看到全部
+    assert len(store.listRules(uid)) == 2
+    print("[OK] 规则按账本隔离")
+
+
 if __name__ == "__main__":
     testAddStructuredRule()
     testUpdateRule()
@@ -142,5 +161,6 @@ if __name__ == "__main__":
     testDeleteRule()
     testRecordHit()
     testStructuredCondWhitelist()
+    testBookIsolation()
     print("\n所有规则 API 测试通过。")
     os.unlink(tmp.name)

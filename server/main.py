@@ -265,6 +265,9 @@ def selectBook(body: BookBody):
     # legacy client 始终在 s["legacyClient"],getClient() 按 provider 路由。
     # 否则「旧账本 → 神象云」切换时会把 s["client"] 顶成 Sui 实例。
     store.setBookId(s["userId"], body.bookId, targetProvider)
+    # 切换账本时把「无账本归属」的老规则绑定到这个新账本(若它还没规则),
+    # 保证历史规则不丢,且不同账本的规则后续各自独立维护。
+    store.adoptOrphansToBook(s["userId"], body.bookId, targetProvider)
     return ok(accounts=service.buildAccountOptions(cli),
               categories=service.buildCategoryOptions(cli),
               bookId=body.bookId, provider=targetProvider)
@@ -418,7 +421,7 @@ def reconcileBills(body: ReconcileBody):
         # 之前的设计是「旧账本查询失败就静默空列表」 —— 但用户看到的现象就是
         # 「已记账条目没显示」,根本不知道发生了什么。把错误抛上去更直接。
         raise HTTPException(status_code=400, detail="查询账本流水失败: %s" % e)
-    rules = store.listRules(s["userId"])
+    rules = store.listRules(s["userId"], s["bookId"], s["provider"])
     items = reconcile.reconcileDetails(pending["details"], suiDetails,
                                        body.suiid, rules)
     return ok(items=items, suiid=body.suiid, provider=provider)
@@ -576,7 +579,7 @@ def tally(body: TallyBody):
             rule["opSuiid"] = body.opSuiid
         if memo:
             rule["memo"] = memo
-        store.addRule(s["userId"], rule)
+        store.addRule(s["userId"], rule, s["bookId"], s["provider"])
 
     # 按规则记账的,累加命中次数,便于在管理页看出哪些规则真在用
     if body.ruleId:
@@ -616,7 +619,9 @@ def validateConditions(conds):
 @app.get("/api/rules")
 def getRules(sid: str):
     s = getSession(sid)
-    return ok(rules=store.listRules(s["userId"]))
+    # 先把无账本归属的老规则绑定到当前账本(若它还没规则),再只返回当前账本的规则
+    store.adoptOrphansToBook(s["userId"], s.get("bookId", ""), s.get("provider", PROVIDER_SHENXIANG))
+    return ok(rules=store.listRules(s["userId"], s["bookId"], s["provider"]))
 
 
 class RuleBody(BaseModel):
@@ -634,7 +639,7 @@ def addRule(body: RuleBody):
     s = getSession(body.sid)
     data = body.dict(exclude={"sid"})
     data["conditions"] = validateConditions(data["conditions"])
-    ruleId = store.addRule(s["userId"], data)
+    ruleId = store.addRule(s["userId"], data, s["bookId"], s["provider"])
     return ok(id=ruleId)
 
 
