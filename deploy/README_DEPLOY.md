@@ -30,7 +30,7 @@
 | 项目 | 说明 |
 |---|---|
 | 后端 VM | Ubuntu 22.04.3，能用 **root** 登录 |
-| Python | 自带 3.10.12，**够用，无需升级**（见第 7 节） |
+| Python | 自带 3.10.12，当前可用；但 `google.api_core` 将于 **2026-10-04** 停止支持 3.10（见第 8 节升级） |
 | 另一台 Nginx 服务器 | 已绑定域名 + TLS 证书（Let's Encrypt 或自有），能访问后端 VM 的 8000 端口 |
 | Gmail | 一个能从后端 VM 连上的代理地址（Clash/V2Ray 的 SOCKS5 或 HTTP 端口） |
 
@@ -171,15 +171,30 @@ cp /opt/auto-sui/autosui.db /opt/auto-sui/sessions.db ~/auto-sui-backup-$(date +
 
 ## 8. 关于「升级软件版本」
 
-- **Python**：Ubuntu 22.04 自带的 **3.10.12 完全满足** `requirements.txt` 全部依赖，**无需升级**。
-  若坚持用 3.11/3.12，可装 `deadsnakes` PPA 后重建 venv：
+- **Python**：Ubuntu 22.04 自带 **3.10.12**，当前可正常运行；但 `google.api_core`
+  已声明将于 **2026-10-04** 停止支持 Python 3.10（import 时打印 `FutureWarning`）。
+  在那之前建议升级到 **3.11 或 3.12**，否则 2026-10-04 后拉到新版的 `google-api-core`
+  可能装不上或运行时报错。
+
+  **升级做法（不动系统 Python，只重建 venv；`auto-sui.service` 无需改动，因为
+  `ExecStart` 指向 `venv/bin/python`，venv 路径保持 `/opt/auto-sui/venv` 不变）：**
   ```bash
+  # 一键（停服→备份→装 3.12→重建 venv→重装依赖→起服）:
+  sudo bash deploy/upgrade_python.sh
+  # 或指定 3.11:
+  PYVER=3.11 sudo -E bash deploy/upgrade_python.sh
+  ```
+  手动步骤（与脚本等价）：
+  ```bash
+  systemctl stop auto-sui
   add-apt-repository ppa:deadsnakes/ppa
-  apt install -y python3.12-venv
-  python3.12 -m venv /opt/auto-sui/venv
+  apt install -y python3.12-venv python3.12-dev
+  mv /opt/auto-sui/venv /opt/auto-sui/venv.old
+  /usr/bin/python3.12 -m venv /opt/auto-sui/venv
   /opt/auto-sui/venv/bin/pip install -r /opt/auto-sui/requirements.txt
   systemctl restart auto-sui
   ```
+  > 数据文件（`autosui.db`/`sessions.db`/`conf.json`）在项目目录，与 venv 无关，不受影响。
 - **依赖版本**：`requirements.txt` 未锁版本，`pip` 取兼容新版。想锁定可 `venv/bin/pip freeze > requirements.lock`。
 - **Node**：脚本装 20.x，足够 Vite 5，无需额外升级。
 
