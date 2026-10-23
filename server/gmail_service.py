@@ -205,9 +205,6 @@ def credsFromJson(text):
         return None
     try:
         info = json.loads(text)
-        granted = set(info.get("scopes") or [])
-        if not set(SCOPES).issubset(granted):
-            return None
         return Credentials.from_authorized_user_info(info, SCOPES)
     except Exception:
         return None
