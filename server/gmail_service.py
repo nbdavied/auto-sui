@@ -24,7 +24,7 @@ from email.utils import parsedate_to_datetime                  # noqa: E402
 # 归档(改标签)属于「写入」操作,需要 gmail.modify 权限;
 # gmail.readonly 是纯只读,调 messages().modify() 会被 Google 用 403 拒绝。
 # gmail.modify 是 readonly 的超集(既能读也能改标签,但不能删邮件),直接用它即可。
-SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 CREDENTIALS_PATH = os.environ.get("GOOGLE_CREDENTIALS",
                                   os.path.join(ROOT, "credentials.json"))
 REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI",
