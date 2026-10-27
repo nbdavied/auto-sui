@@ -58,11 +58,22 @@ def isMatchedDetail(bankDetail, suiDetail, suiid):
             return True
     return False
 
-def findSuiDetail(bankDetail, suiDetails, suiid):
-    for suiDetail in suiDetails:
+def findSuiDetailIndex(bankDetail, suiDetails, suiid, claimed=None):
+    """返回第一条匹配的账本流水下标,没有则 -1。
+
+    claimed 是已被前面银行流水占用的下标集合:一条账本流水只能证明一笔银行
+    流水已入账,否则同日同额的多笔支出会被同一条记录全判成「已记账」。
+    """
+    for idx, suiDetail in enumerate(suiDetails):
+        if claimed is not None and idx in claimed:
+            continue
         if isMatchedDetail(bankDetail, suiDetail, suiid):
-            return suiDetail
-    return None
+            return idx
+    return -1
+
+def findSuiDetail(bankDetail, suiDetails, suiid, claimed=None):
+    idx = findSuiDetailIndex(bankDetail, suiDetails, suiid, claimed)
+    return None if idx < 0 else suiDetails[idx]
 def transDate(date):
     return date[0:4] + '.' + date[4:6] + '.' + date[6:8]
 def buildPayTime(date, time):
@@ -196,9 +207,12 @@ if __name__ == "__main__":
         print(suiDetails)
         bankDetails = bank['details']
         print(bankDetails)
+        claimed = set()   # 已被占用的账本流水下标,保证一笔账本流水只对一笔银行流水
         for bankDetail in bankDetails:
-            matchedSuiDetail = findSuiDetail(bankDetail, suiDetails, suiid)
+            idx = findSuiDetailIndex(bankDetail, suiDetails, suiid, claimed)
+            matchedSuiDetail = None if idx < 0 else suiDetails[idx]
             if matchedSuiDetail != None:
+                claimed.add(idx)
                 bankDetail["tranId"] = matchedSuiDetail["tranId"]
                 print("------------------------")
                 print("已记账条目：")

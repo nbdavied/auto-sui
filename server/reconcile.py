@@ -134,11 +134,25 @@ def isMatchedDetail(bankDetail, suiDetail, suiid):
     return False
 
 
-def findSuiDetail(bankDetail, suiDetails, suiid):
-    for suiDetail in suiDetails:
+def findSuiDetailIndex(bankDetail, suiDetails, suiid, claimed=None):
+    """返回第一条匹配的账本流水的下标,没有则 -1。
+
+    claimed 是「已被前面的银行流水占用」的下标集合。一笔账本流水只能证明一笔
+    银行流水已入账:同一天同金额的多笔支出(比如 10-05 两笔 5 元)在账本里只
+    记了一条时,第一条银行流水占用它,第二条必须判为未记账,否则两条都会被
+    标成已入账,其中一笔实际漏记却看不出来。
+    """
+    for idx, suiDetail in enumerate(suiDetails or []):
+        if claimed is not None and idx in claimed:
+            continue
         if isMatchedDetail(bankDetail, suiDetail, suiid):
-            return suiDetail
-    return None
+            return idx
+    return -1
+
+
+def findSuiDetail(bankDetail, suiDetails, suiid, claimed=None):
+    idx = findSuiDetailIndex(bankDetail, suiDetails, suiid, claimed)
+    return None if idx < 0 else suiDetails[idx]
 
 
 def matchRule(rule, detail):
@@ -178,13 +192,19 @@ def reconcileDetails(bankDetails, suiDetails, suiid, rules=None):
       status: 'matched' 已入账 / 'auto' 规则可自动记账 / 'manual' 需人工判断
       matched: 命中的账本流水
       rule:    命中的规则
+
+    匹配是一对一的:一条账本流水被占用后,不再参与后续银行流水的匹配
+    (见 findSuiDetailIndex 的说明)。
     """
     rules = rules or []
+    claimed = set()
     result = []
     for bankDetail in bankDetails:
         item = dict(bankDetail)
-        matched = findSuiDetail(bankDetail, suiDetails, suiid)
+        idx = findSuiDetailIndex(bankDetail, suiDetails, suiid, claimed)
+        matched = None if idx < 0 else suiDetails[idx]
         if matched is not None:
+            claimed.add(idx)
             item["status"] = "matched"
             item["matched"] = matched
         else:
